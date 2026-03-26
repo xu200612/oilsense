@@ -311,6 +311,10 @@ if is_black_swan:
             with st.spinner("正在调用 DeepSeek 进行情景分析..."):
                 try:
                     from black_swan import get_black_swan_report
+                    import black_swan
+
+                    black_swan.ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
                     report = get_black_swan_report()
                     analysis = report.get("analysis", {}).get("analysis", "")
                     if analysis:
