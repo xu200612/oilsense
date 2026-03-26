@@ -28,3 +28,6 @@ Thumbs.db
 .vscode/
 *.iml
 .streamlit/secrets.toml
+accounts.db
+test_ais.py
+test_ais2.py
