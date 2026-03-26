@@ -13,8 +13,8 @@ __pycache__/
 *.pyd
 
 # 原始数据（太大且含敏感信息）
-data/raw/*.csv
 data/raw/*.json
+
 
 # 处理后的大文件
 data/processed/feature_matrix.csv
