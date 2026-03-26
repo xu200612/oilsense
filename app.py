@@ -5,10 +5,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+import streamlit.components.v1 as components
 from xgboost import XGBRegressor
 from dotenv import load_dotenv
 from datetime import datetime
-
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
@@ -20,21 +20,368 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── 产油国数据（静态，来源EIA 2024年报）─────────────────────────────────────
+# ── 全局CSS ───────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+* { font-family: 'Inter', sans-serif !important; }
+
+/* ── 全局背景 ── */
+[data-testid="stAppViewContainer"] {
+    background: #080c14 !important;
+}
+[data-testid="stMain"] {
+    background: transparent !important;
+}
+
+/* ════════════════════════════════
+   侧边栏
+════════════════════════════════ */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #07090f 0%, #0a0d18 60%, #07090f 100%) !important;
+    border-right: 1px solid rgba(180,120,40,0.18) !important;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.6) !important;
+}
+[data-testid="stSidebar"] section[data-testid="stSidebarContent"] {
+    padding: 2rem 1.2rem 1.5rem !important;
+}
+
+/* Logo */
+[data-testid="stSidebar"] h1 {
+    font-size: 1.5rem !important;
+    font-weight: 800 !important;
+    background: linear-gradient(90deg, #c8922a 0%, #e8c97a 50%, #c8922a 100%) !important;
+    background-size: 200% auto !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    animation: shimmer 4s linear infinite !important;
+    letter-spacing: -0.02em !important;
+    margin-bottom: 0.2rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+    font-size: 0.72rem !important;
+    color: #4a3f28 !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    margin-bottom: 1.8rem !important;
+}
+
+/* 导航分组标题 */
+[data-testid="stSidebar"] h3 {
+    font-size: 0.68rem !important;
+    font-weight: 600 !important;
+    color: #4a3f28 !important;
+    letter-spacing: 0.15em !important;
+    text-transform: uppercase !important;
+    margin: 1.5rem 0 0.6rem 0.4rem !important;
+    border-bottom: none !important;
+}
+
+/* 隐藏折叠按钮文字 */
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="collapsedControl"] span {
+    display: none !important;
+}
+[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="collapsedControl"] svg {
+    color: rgba(180,120,40,0.4) !important;
+}
+
+[data-testid="stSidebar"] .stRadio > div {
+    gap: 3px !important;
+}
+/* 覆盖radio选中圆点颜色 */
+[data-testid="stSidebar"] .stRadio [data-baseweb="radio"] div[class*="checked"],
+[data-testid="stSidebar"] [data-baseweb="radio"] > div:first-child {
+    background-color: #c8922a !important;
+    border-color: #e8c97a !important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] {
+    accent-color: #c8922a !important;
+}
+[data-testid="stSidebar"] input[type="radio"]:checked + div,
+[data-testid="stSidebar"] input[type="radio"] + div {
+    border-color: #c8922a !important;
+}
+[data-testid="stSidebar"] input[type="radio"]:checked + div::before {
+    background: #c8922a !important;
+}
+
+/* 导航项 */
+[data-testid="stSidebar"] .stRadio label {
+    display: flex !important;
+    align-items: center !important;
+    position: relative !important;
+    padding: 9px 14px 9px 16px !important;
+    border-radius: 8px !important;
+    font-size: 13.5px !important;
+    font-weight: 500 !important;
+    color: #7a6a4a !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    border: 1px solid transparent !important;
+    margin: 1px 0 !important;
+    letter-spacing: 0.01em !important;
+}
+
+/* 左侧竖线指示器 */
+[data-testid="stSidebar"] .stRadio label::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0px !important;
+    top: 18% !important;
+    height: 64% !important;
+    width: 2.5px !important;
+    border-radius: 2px !important;
+    background: transparent !important;
+    transition: all 0.2s ease !important;
+}
+
+/* hover */
+[data-testid="stSidebar"] .stRadio label:hover {
+    background: rgba(180,120,40,0.08) !important;
+    color: #c9a96e !important;
+    border-color: rgba(180,120,40,0.18) !important;
+}
+
+/* 选中 */
+[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
+    background: linear-gradient(90deg,
+        rgba(180,120,40,0.2) 0%,
+        rgba(180,120,40,0.04) 100%) !important;
+    color: #e8c97a !important;
+    border-color: rgba(180,120,40,0.4) !important;
+    font-weight: 600 !important;
+}
+[data-testid="stSidebar"] .stRadio label[data-checked="true"]::before {
+    background: linear-gradient(180deg, #c8922a, #e8c97a) !important;
+    box-shadow: 0 0 8px rgba(232,201,122,0.6) !important;
+}
+
+[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p {
+    margin: 0 !important;
+    font-size: 13.5px !important;
+}
+
+/* 侧边栏指标卡片 */
+[data-testid="stSidebar"] [data-testid="stMetric"] {
+    background: rgba(180,120,40,0.06) !important;
+    border: 1px solid rgba(180,120,40,0.15) !important;
+    border-radius: 10px !important;
+    padding: 12px 14px !important;
+    margin-bottom: 8px !important;
+    backdrop-filter: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetric"]:hover {
+    border-color: rgba(180,120,40,0.35) !important;
+    background: rgba(180,120,40,0.1) !important;
+    transform: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetricValue"] {
+    font-size: 1.25rem !important;
+    color: #e8c97a !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+    font-size: 0.72rem !important;
+    color: #5a4a2a !important;
+}
+
+/* 侧边栏分割线 */
+[data-testid="stSidebar"] hr {
+    border-color: rgba(180,120,40,0.12) !important;
+    margin: 1.2rem 0 !important;
+}
+
+/* ════════════════════════════════
+   主内容区
+════════════════════════════════ */
+
+/* 指标卡片 */
+[data-testid="stMetric"] {
+    background: rgba(16,20,30,0.75) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(180,120,40,0.18) !important;
+    border-radius: 14px !important;
+    padding: 18px 20px !important;
+    transition: all 0.25s ease !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.35) !important;
+}
+[data-testid="stMetric"]:hover {
+    border-color: rgba(180,120,40,0.45) !important;
+    box-shadow: 0 6px 32px rgba(180,120,40,0.12) !important;
+    transform: translateY(-2px) !important;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.65rem !important;
+    font-weight: 700 !important;
+    color: #e8c97a !important;
+    letter-spacing: -0.02em !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.78rem !important;
+    font-weight: 500 !important;
+    color: #7a6a4a !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+}
+
+/* 标题 */
+h1 {
+    font-size: 2rem !important;
+    font-weight: 800 !important;
+    background: linear-gradient(90deg, #c8922a 0%, #e8c97a 50%, #c8922a 100%) !important;
+    background-size: 200% auto !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    animation: shimmer 4s linear infinite !important;
+    letter-spacing: -0.03em !important;
+}
+h2 {
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    color: #c9a96e !important;
+    border-bottom: 1px solid rgba(180,120,40,0.18) !important;
+    padding-bottom: 8px !important;
+    margin-top: 1.5rem !important;
+}
+h3 {
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    color: #a89060 !important;
+}
+@keyframes shimmer {
+    0%   { background-position: 0% center; }
+    100% { background-position: 200% center; }
+}
+
+/* 按钮 */
+.stButton > button {
+    background: rgba(16,20,30,0.8) !important;
+    border: 1px solid rgba(180,120,40,0.35) !important;
+    border-radius: 8px !important;
+    color: #c9a96e !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    transition: all 0.2s ease !important;
+}
+.stButton > button:hover {
+    background: rgba(180,120,40,0.15) !important;
+    border-color: rgba(180,120,40,0.6) !important;
+    color: #e8c97a !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 16px rgba(180,120,40,0.2) !important;
+}
+.stButton > button:active {
+    background: rgba(180,120,40,0.25) !important;
+    border-color: #e8c97a !important;
+    color: #e8c97a !important;
+    transform: translateY(0px) !important;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.3),
+                0 0 12px rgba(232,201,122,0.3) !important;
+}
+.stButton > button:focus:not(:active) {
+    border-color: rgba(180,120,40,0.4) !important;
+    box-shadow: 0 0 0 2px rgba(180,120,40,0.2) !important;
+}
+
+/* 隐藏按钮图标文字泄露 */
+button span.material-symbols-rounded {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+
+/* selectbox / date_input */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stDateInput"] input {
+    background: rgba(16,20,30,0.75) !important;
+    border: 1px solid rgba(180,120,40,0.25) !important;
+    border-radius: 8px !important;
+    color: #c9a96e !important;
+}
+
+/* 分割线 */
+hr { border-color: rgba(180,120,40,0.15) !important; }
+
+/* caption */
+[data-testid="stCaptionContainer"] p {
+    color: #6a5a3a !important;
+    font-size: 0.78rem !important;
+}
+
+/* ════════════════════════════════
+   粒子背景
+════════════════════════════════ */
+.oil-drop {
+    position: fixed;
+    top: -20px;
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    background: radial-gradient(ellipse at 40% 35%,
+        rgba(220,160,50,0.55) 0%,
+        rgba(180,100,20,0.35) 40%,
+        rgba(100,60,10,0.1) 100%);
+    animation: dropFall linear infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+@keyframes dropFall {
+    0%   { transform: translateY(-20px) scaleX(0.85); opacity: 0; }
+    5%   { opacity: 1; }
+    90%  { opacity: 0.6; }
+    100% { transform: translateY(100vh) scaleX(0.85); opacity: 0; }
+}
+
+/* ════════════════════════════════
+   移动端
+════════════════════════════════ */
+@media (max-width: 768px) {
+    h1 { font-size: 1.4rem !important; }
+    h2 { font-size: 1.1rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    [data-testid="stMetric"] { padding: 12px 14px !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── 粒子节点 ──────────────────────────────────────────────────────────────
+st.markdown("""
+<div aria-hidden="true">
+<div class="oil-drop" style="left:5%;  width:5px; height:9px;  animation-duration:6.2s; animation-delay:0s;"></div>
+<div class="oil-drop" style="left:10%; width:3px; height:6px;  animation-duration:8.1s; animation-delay:1.2s;"></div>
+<div class="oil-drop" style="left:16%; width:6px; height:11px; animation-duration:7.4s; animation-delay:0.5s;"></div>
+<div class="oil-drop" style="left:22%; width:4px; height:7px;  animation-duration:9.0s; animation-delay:2.1s;"></div>
+<div class="oil-drop" style="left:28%; width:5px; height:9px;  animation-duration:6.8s; animation-delay:3.3s;"></div>
+<div class="oil-drop" style="left:34%; width:3px; height:5px;  animation-duration:10.2s;animation-delay:0.8s;"></div>
+<div class="oil-drop" style="left:40%; width:6px; height:10px; animation-duration:7.1s; animation-delay:1.9s;"></div>
+<div class="oil-drop" style="left:46%; width:4px; height:8px;  animation-duration:8.5s; animation-delay:4.0s;"></div>
+<div class="oil-drop" style="left:52%; width:5px; height:9px;  animation-duration:6.5s; animation-delay:2.7s;"></div>
+<div class="oil-drop" style="left:58%; width:3px; height:6px;  animation-duration:9.3s; animation-delay:0.3s;"></div>
+<div class="oil-drop" style="left:64%; width:6px; height:11px; animation-duration:7.8s; animation-delay:3.6s;"></div>
+<div class="oil-drop" style="left:70%; width:4px; height:7px;  animation-duration:8.9s; animation-delay:1.5s;"></div>
+<div class="oil-drop" style="left:76%; width:5px; height:9px;  animation-duration:6.3s; animation-delay:5.1s;"></div>
+<div class="oil-drop" style="left:82%; width:3px; height:5px;  animation-duration:10.5s;animation-delay:2.4s;"></div>
+<div class="oil-drop" style="left:88%; width:6px; height:10px; animation-duration:7.6s; animation-delay:0.9s;"></div>
+<div class="oil-drop" style="left:93%; width:4px; height:8px;  animation-duration:8.2s; animation-delay:3.8s;"></div>
+<div class="oil-drop" style="left:97%; width:5px; height:9px;  animation-duration:6.9s; animation-delay:1.1s;"></div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── 产油国数据 ────────────────────────────────────────────────────────────
 OIL_COUNTRIES = {
-    "美国": {"lat": 38.0, "lon": -97.0, "code": "US", "prod": 12.9, "share": 13.2},
-    "俄罗斯": {"lat": 61.0, "lon": 90.0, "code": "RS", "prod": 10.1, "share": 10.3},
-    "沙特阿拉伯": {"lat": 24.0, "lon": 45.0, "code": "SA", "prod": 9.6, "share": 9.8},
-    "伊拉克": {"lat": 33.0, "lon": 44.0, "code": "IZ", "prod": 4.2, "share": 4.3},
-    "伊朗": {"lat": 32.0, "lon": 53.0, "code": "IR", "prod": 3.4, "share": 3.5},
-    "阿联酋": {"lat": 24.0, "lon": 54.0, "code": "AE", "prod": 3.2, "share": 3.3},
-    "科威特": {"lat": 29.0, "lon": 47.0, "code": "KU", "prod": 2.7, "share": 2.8},
-    "挪威": {"lat": 60.0, "lon": 10.0, "code": "NO", "prod": 1.8, "share": 1.8},
-    "哈萨克斯坦": {"lat": 48.0, "lon": 68.0, "code": "KZ", "prod": 1.8, "share": 1.8},
-    "尼日利亚": {"lat": 9.0, "lon": 8.0, "code": "NG", "prod": 1.5, "share": 1.5},
-    "利比亚": {"lat": 27.0, "lon": 17.0, "code": "LY", "prod": 1.2, "share": 1.2},
-    "委内瑞拉": {"lat": 8.0, "lon": -66.0, "code": "VE", "prod": 0.9, "share": 0.9},
-    "阿尔及利亚": {"lat": 28.0, "lon": 2.0, "code": "AL", "prod": 0.9, "share": 0.9},
+    "美国":      {"lat": 38.0, "lon": -97.0, "code": "US", "prod": 12.9, "share": 13.2},
+    "俄罗斯":    {"lat": 61.0, "lon":  90.0, "code": "RS", "prod": 10.1, "share": 10.3},
+    "沙特阿拉伯":{"lat": 24.0, "lon":  45.0, "code": "SA", "prod":  9.6, "share":  9.8},
+    "伊拉克":    {"lat": 33.0, "lon":  44.0, "code": "IZ", "prod":  4.2, "share":  4.3},
+    "伊朗":      {"lat": 32.0, "lon":  53.0, "code": "IR", "prod":  3.4, "share":  3.5},
+    "阿联酋":    {"lat": 24.0, "lon":  54.0, "code": "AE", "prod":  3.2, "share":  3.3},
+    "科威特":    {"lat": 29.0, "lon":  47.0, "code": "KU", "prod":  2.7, "share":  2.8},
+    "挪威":      {"lat": 60.0, "lon":  10.0, "code": "NO", "prod":  1.8, "share":  1.8},
+    "哈萨克斯坦":{"lat": 48.0, "lon":  68.0, "code": "KZ", "prod":  1.8, "share":  1.8},
+    "尼日利亚":  {"lat":  9.0, "lon":   8.0, "code": "NG", "prod":  1.5, "share":  1.5},
+    "利比亚":    {"lat": 27.0, "lon":  17.0, "code": "LY", "prod":  1.2, "share":  1.2},
+    "委内瑞拉":  {"lat":  8.0, "lon": -66.0, "code": "VE", "prod":  0.9, "share":  0.9},
+    "阿尔及利亚":{"lat": 28.0, "lon":   2.0, "code": "AL", "prod":  0.9, "share":  0.9},
 }
 
 # 地缘政治重点事件（用于地球上的感叹号标注）
@@ -229,15 +576,15 @@ def get_country_news(country_name, n=3):
     return filtered[["date", "title", "source", "url"]].to_dict("records")
 
 
-# ── 侧边栏 ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🛢 OilSense")
     st.caption("原油风险智能预警系统")
     st.divider()
+    st.markdown("### 导航")
     page = st.radio(
         "导航",
         ["全球能源地图", "市场概览", "风险预测", "历史回测"],
-        label_visibility="collapsed"
+        label_visibility="visible"
     )
     st.divider()
     last_low = pred_df["pred_enhanced_low"].iloc[-1]
@@ -291,7 +638,7 @@ if is_black_swan:
     )
 
     # 展开显示 DeepSeek 分析
-    with st.expander("查看 AI 情景分析详情", expanded=True):
+    if st.button("查看AI情景分析详情", key="bs_report_btn", use_container_width=True):
         report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
         if os.path.exists(report_path):
             import json
