@@ -1201,7 +1201,8 @@ elif page == "历史回测":
         edate = pd.Timestamp(event["date"])
         if pd.Timestamp(start_date) <= edate <= pd.Timestamp(end_date):
             fig.add_vline(
-                x=event["date"], line_dash="dash",
+                x=edate.timestamp() * 1000,
+                line_dash="dash",
                 line_color=event["color"], line_width=1.5,
                 annotation_text=event["label"],
                 annotation_position="top",
@@ -1257,8 +1258,11 @@ elif page == "历史回测":
         x=ev_data.index, y=ev_data["target"],
         name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5)
     ))
-    fig3.add_vline(x=ev_date, line_dash="dash",
-                   line_color=ev_color, line_width=2)
+    fig3.add_vline(
+        x=pd.Timestamp(ev_date).timestamp() * 1000,
+        line_dash="dash",
+        line_color=ev_color, line_width=2
+    )
     fig3.add_hline(y=0, line_color="white", line_width=0.8)
     fig3.update_layout(
         height=350, margin=dict(l=0, r=0, t=10, b=0),
