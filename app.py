@@ -270,6 +270,10 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════
 # ── 黑天鹅预警横幅（全页面显示）─────────────────────────────────────────
 is_black_swan, bs_signals = get_black_swan_status()
+st.write("DEBUG - is_black_swan:", is_black_swan)
+st.write("DEBUG - triggers:", bs_signals.get("triggers", []))
+st.write("DEBUG - hormuz_blocked:", bs_signals.get("hormuz_blocked", "未找到"))
+st.write("DEBUG - hormuz_ratio:", bs_signals.get("hormuz_ratio", "未找到"))
 
 if is_black_swan:
     triggers_text = " ｜ ".join(bs_signals.get("triggers", []))
