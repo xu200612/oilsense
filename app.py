@@ -270,7 +270,6 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════
 # ── 黑天鹅预警横幅（全页面显示）─────────────────────────────────────────
 is_black_swan, bs_signals = get_black_swan_status()
-st.write("DEBUG - portwatch exists:", os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "raw", "portwatch_chokepoints.csv")))
 
 if is_black_swan:
     triggers_text = " ｜ ".join(bs_signals.get("triggers", []))
@@ -312,7 +311,6 @@ if is_black_swan:
                 try:
                     from black_swan import get_black_swan_report
                     import black_swan
-
                     black_swan.ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
                     report = get_black_swan_report()
