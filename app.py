@@ -408,17 +408,11 @@ def auto_update_data():
         from update_daily import (
             update_oil_prices,
             update_macro_data,
-            update_news_api,
-            update_news_rss,
-            update_sentiment,
-            update_portwatch,
+            update_news_rss,      # RSS很快
         )
-        update_oil_prices()
-        update_macro_data()
-        update_news_api()
-        update_news_rss()
-        update_sentiment()
-        update_portwatch()
+        update_oil_prices()       # FRED拉增量，通常0条，很快
+        update_macro_data()       # 同上
+        update_news_rss()         # RSS抓取，约10秒
         return datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception as e:
         return f"更新失败: {e}"
