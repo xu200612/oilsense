@@ -122,12 +122,17 @@ def build_features(df, target_col="WTI", horizon=10):
         feat["gdelt_tone_chg"]      = feat["gdelt_tone"].diff(3)
         print("  GDELT 衍生特征已构建")
 
-    # IMF PortWatch 航运因子
-    "cp6_tanker", "cp4_tanker", "cp1_tanker", "cp5_tanker",
-    "cp11_tanker", "cp7_tanker",
-    "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
-    "mandeb_tanker_ma7", "mandeb_blocked",
-    "cape_reroute_signal",
+    # IMF PortWatch 航运衍生特征
+    portwatch_cols = [
+        "cp6_tanker", "cp4_tanker", "cp1_tanker", "cp5_tanker",
+        "cp11_tanker", "cp7_tanker",
+        "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
+        "mandeb_tanker_ma7", "mandeb_blocked",
+        "cape_reroute_signal",
+    ]
+    portwatch_present = [c for c in portwatch_cols if c in feat.columns]
+    if portwatch_present:
+        print("  PortWatch 航运特征已纳入：" + str(len(portwatch_present)) + " 个字段")
 
     # 目标变量：严格截断防止数据泄露
     feat["target"] = feat[target_col].pct_change(horizon).shift(-horizon)
@@ -153,7 +158,14 @@ def build_features(df, target_col="WTI", horizon=10):
         "gdelt_conflict_cnt", "gdelt_coop_cnt",
         "gdelt_conflict_intensity", "gdelt_mentions",
         "gdelt_goldstein_chg", "gdelt_conflict_ma5", "gdelt_tone_chg",
-
+        # IMF PortWatch 航运因子
+        "cp6_tanker", "cp4_tanker", "cp1_tanker", "cp5_tanker",
+        "cp11_tanker", "cp7_tanker",
+        "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
+        "mandeb_tanker_ma7", "mandeb_blocked",
+        "cape_reroute_signal",
+        # 宏观补充
+        "US_PPI",
     ]
 
     # Baseline 特征集（仅传统量化因子）

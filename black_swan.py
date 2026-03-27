@@ -132,9 +132,11 @@ def _build_context(signals: dict, recent_news: list = None) -> str:
                 else:
                     start_date = blocked[blocked == 1].index[0]
                 blockade_days = (blocked.index[-1] - start_date).days + 1
-            cp6       = df_pw["cp6_tanker"].dropna()
-            pre_mean  = float(cp6[cp6.index < "2026-03-01"].tail(30).mean())
-            post_mean = float(cp6[cp6.index >= "2026-03-01"].mean())
+            cp6 = df_pw["cp6_tanker"].dropna()
+            # 动态封锁起始日，不硬编码
+            _blockade_start = start_date if int(blocked.iloc[-1]) == 1 and "start_date" in dir() else cp6.index[-30]
+            pre_mean  = float(cp6[cp6.index < _blockade_start].tail(30).mean()) if len(cp6[cp6.index < _blockade_start]) >= 5 else float(cp6.head(30).mean())
+            post_mean = float(cp6[cp6.index >= _blockade_start].mean()) if len(cp6[cp6.index >= _blockade_start]) > 0 else float(cp6.iloc[-1])
             drop_pct  = (1 - post_mean / pre_mean) * 100 if pre_mean > 0 else 0
             hormuz_history = (
                 "封锁前30日均值：{:.1f}艘/日，"
@@ -159,13 +161,32 @@ def _build_context(signals: dict, recent_news: list = None) -> str:
             latest = float(wti.iloc[-1])
             w1ago  = float(wti.iloc[-6])  if len(wti) > 6  else latest
             m1ago  = float(wti.iloc[-22]) if len(wti) > 22 else latest
-            pre_b  = float(wti[wti.index < "2026-03-01"].iloc[-1]) if len(wti[wti.index < "2026-03-01"]) else latest
+            # 动态找封锁前基准价，不硬编码日期
+            _pw_path = os.path.join(ROOT_DIR, "data", "raw", "portwatch_chokepoints.csv")
+            _blockade_dt = None
+            if os.path.exists(_pw_path):
+                _df_pw2 = pd.read_csv(_pw_path, index_col=0, parse_dates=True)
+                if "hormuz_blocked" in _df_pw2.columns:
+                    _bl = _df_pw2["hormuz_blocked"].dropna()
+                    if len(_bl) > 0 and int(_bl.iloc[-1]) == 1:
+                        _unbl = _bl[_bl == 0]
+                        if len(_unbl) > 0:
+                            _blockade_dt = _bl[_bl.index > _unbl.index[-1]].index[0]
+                        else:
+                            _blockade_dt = _bl[_bl == 1].index[0]
+            if _blockade_dt is not None:
+                _pre_wti = wti[wti.index < _blockade_dt]
+                pre_b = float(_pre_wti.iloc[-1]) if len(_pre_wti) > 0 else latest
+                pre_label = _blockade_dt.strftime("%m月%d日") + "封锁前"
+            else:
+                pre_b = float(wti.iloc[-30]) if len(wti) > 30 else latest
+                pre_label = "30日前"
             oil_context = (
                 "WTI最新价：{:.2f}美元/桶\n"
-                "封锁前价格（2月底）：{:.2f}美元/桶\n"
-                "封锁后涨幅：{:.1f}%\n"
+                "基准价格（{}）：{:.2f}美元/桶\n"
+                "区间涨幅：{:.1f}%\n"
                 "1周前：{:.2f}，1个月前：{:.2f}".format(
-                    latest, pre_b,
+                    latest, pre_label, pre_b,
                     (latest / pre_b - 1) * 100 if pre_b > 0 else 0,
                     w1ago, m1ago)
             )
