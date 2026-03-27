@@ -27,7 +27,6 @@ CHOKEPOINTS = {
     "chokepoint7" : "好望角",
 }
 
-# ── 新闻来源白名单 ─────────────────────────────────────────────────────────
 TRUSTED_SOURCES = {
     "Reuters", "Bloomberg", "Financial Times", "The Wall Street Journal",
     "Associated Press", "BBC News", "CNBC", "S&P Global", "Platts",
@@ -38,7 +37,6 @@ TRUSTED_SOURCES = {
     "Upstream Online", "Energy Intelligence", "Argus Media",
 }
 
-# ── RSS数据源 ──────────────────────────────────────────────────────────────
 RSS_FEEDS = [
     ("EIA Official",        "https://www.eia.gov/rss/press_rss.xml"),
     ("EIA Today In Energy", "https://www.eia.gov/rss/todayinenergy.xml"),
@@ -63,15 +61,18 @@ OIL_KEYWORDS = [
     "OPEC+", "production cut", "Hormuz", "chokepoint",
 ]
 
-# NewsAPI分级关键词
 TIER1_KEYWORDS = [
-    ("crude oil price",        20),
-    ("OPEC production",        20),
-    ("oil supply disruption",  20),
-    ("Strait of Hormuz",       20),
-    ("Iran sanctions oil",     20),
-    ("Russia oil sanctions",   20),
+    ("crude oil price",         20),
+    ("OPEC production",         20),
+    ("oil supply disruption",   20),
+    ("Strait of Hormuz",        20),
+    ("Iran sanctions oil",      20),
+    ("Russia oil sanctions",    20),
+    ("Black Sea oil tanker",    20),
+    ("Ukraine Russia shipping", 15),
+    ("Baltic Sea energy",       15),
 ]
+
 TIER2_KEYWORDS = [
     ("Saudi Arabia oil",   10),
     ("Iraq oil OPEC",      10),
@@ -82,6 +83,14 @@ TIER2_KEYWORDS = [
     ("oil refinery",       10),
     ("Venezuela oil",      10),
 ]
+
+AIS_CHOKEPOINTS = {
+    "霍尔木兹海峡" : {"min_lat": 25.5, "max_lat": 27.5, "min_lon": 55.5, "max_lon": 57.5,  "normal_count": 32, "importance": "全球20%石油贸易经过此处",    "coverage": True},
+    "曼德海峡"     : {"min_lat": 11.0, "max_lat": 13.5, "min_lon": 42.5, "max_lon": 44.5,  "normal_count": 18, "importance": "红海通往印度洋的唯一通道",    "coverage": False},
+    "苏伊士运河"   : {"min_lat": 29.5, "max_lat": 31.5, "min_lon": 32.0, "max_lon": 33.0,  "normal_count": 15, "importance": "欧洲与亚洲最短海上航线",      "coverage": False},
+    "马六甲海峡"   : {"min_lat":  1.0, "max_lat":  4.0, "min_lon": 99.0, "max_lon": 104.0, "normal_count": 85, "importance": "中东原油运往亚洲的主要通道",   "coverage": True},
+    "博斯普鲁斯海峡": {"min_lat": 40.5, "max_lat": 41.5, "min_lon": 28.5, "max_lon": 29.5, "normal_count": 12, "importance": "俄罗斯黑海原油出口唯一通道",  "coverage": True},
+}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -103,7 +112,6 @@ def _merge_indexed(existing, new_df):
 
 
 def _merge_news(existing, new_df):
-    """合并新闻DataFrame，去重并保留最近90天"""
     combined = pd.concat([existing, new_df], ignore_index=True) if len(existing) > 0 else new_df
     combined = combined.drop_duplicates(subset=["title"])
     combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
@@ -225,7 +233,19 @@ def update_macro_data():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 新闻：NewsAPI（分级限量 + 来源过滤）
+# GDELT
+# ══════════════════════════════════════════════════════════════════════════
+def update_gdelt():
+    print("\n[GDELT] 增量更新（最近7天）...")
+    try:
+        from fetch_gdelt import update_gdelt_recent
+        update_gdelt_recent(days_back=7)
+    except Exception as e:
+        print(f"  失败: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 新闻：NewsAPI
 # ══════════════════════════════════════════════════════════════════════════
 def update_news_api():
     print("\n[新闻-API] NewsAPI增量更新...")
@@ -238,7 +258,7 @@ def update_news_api():
         existing   = pd.read_csv(out_path) if os.path.exists(out_path) else pd.DataFrame()
 
         all_articles = []
-        all_keywords = [(k, l) for k, l in TIER1_KEYWORDS] + [(k, l) for k, l in TIER2_KEYWORDS]
+        all_keywords = list(TIER1_KEYWORDS) + list(TIER2_KEYWORDS)
 
         for keyword, limit in all_keywords:
             try:
@@ -282,15 +302,15 @@ def update_news_api():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 新闻：RSS（免费高质量来源）
+# 新闻：RSS
 # ══════════════════════════════════════════════════════════════════════════
 def update_news_rss():
     print("\n[新闻-RSS] RSS增量更新...")
     try:
-        out_path   = os.path.join(ROOT_DIR, "data", "raw", "news_data.csv")
-        cutoff     = datetime.today() - timedelta(days=3)
-        existing   = pd.read_csv(out_path) if os.path.exists(out_path) else pd.DataFrame()
-        articles   = []
+        out_path = os.path.join(ROOT_DIR, "data", "raw", "news_data.csv")
+        cutoff   = datetime.today() - timedelta(days=3)
+        existing = pd.read_csv(out_path) if os.path.exists(out_path) else pd.DataFrame()
+        articles = []
 
         for source_name, url in RSS_FEEDS:
             try:
@@ -301,16 +321,13 @@ def update_news_rss():
                     summary  = entry.get("summary", entry.get("description", "")).strip()
                     date_str = _parse_rss_date(entry)
                     link     = entry.get("link", "")
-
                     try:
                         if datetime.strptime(date_str, "%Y-%m-%d") < cutoff:
                             continue
                     except:
                         pass
-
                     if not title or not _is_oil_related(title, summary):
                         continue
-
                     articles.append({
                         "date"        : date_str,
                         "title"       : title,
@@ -320,7 +337,6 @@ def update_news_rss():
                         "url"         : link,
                     })
                     count += 1
-
                 print(f"  {source_name.ljust(22)} {count} 条 ✓")
             except Exception as e:
                 print(f"  {source_name.ljust(22)} 失败: {str(e)[:40]}")
@@ -335,6 +351,18 @@ def update_news_rss():
         combined.to_csv(out_path, index=False, encoding="utf-8-sig")
         print(f"  RSS完成，共 {len(combined)} 条")
 
+    except Exception as e:
+        print(f"  失败: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 情感分析
+# ══════════════════════════════════════════════════════════════════════════
+def update_sentiment():
+    print("\n[情感] 增量情感分析...")
+    try:
+        from sentiment_analysis import incremental_sentiment_analysis
+        incremental_sentiment_analysis(max_articles=50)
     except Exception as e:
         print(f"  失败: {e}")
 
@@ -478,22 +506,14 @@ def update_ais():
 
         out_path = os.path.join(ROOT_DIR, "data", "raw", "ais_snapshot.json")
 
-        AIS_CHOKEPOINTS = {
-            "霍尔木兹海峡" : {"min_lat": 25.5, "max_lat": 27.5, "min_lon": 55.5, "max_lon": 57.5, "normal_count": 32, "importance": "全球20%石油贸易经过此处",    "coverage": True},
-            "曼德海峡"     : {"min_lat": 11.0, "max_lat": 13.5, "min_lon": 42.5, "max_lon": 44.5, "normal_count": 18, "importance": "红海通往印度洋的唯一通道",    "coverage": False},
-            "苏伊士运河"   : {"min_lat": 29.5, "max_lat": 31.5, "min_lon": 32.0, "max_lon": 33.0, "normal_count": 15, "importance": "欧洲与亚洲最短海上航线",      "coverage": False},
-            "马六甲海峡"   : {"min_lat":  1.0, "max_lat":  4.0, "min_lon": 99.0, "max_lon": 104.0,"normal_count": 85, "importance": "中东原油运往亚洲的主要通道",   "coverage": True},
-            "博斯普鲁斯海峡": {"min_lat": 40.5, "max_lat": 41.5, "min_lon": 28.5, "max_lon": 29.5, "normal_count": 12, "importance": "俄罗斯黑海原油出口唯一通道", "coverage": True},
-        }
-
         def assess_risk(count, normal_count):
             if normal_count == 0:
                 return "未知", "#95a5a6"
             ratio = count / normal_count
-            if ratio < 0.4:   return "极高风险", "#e74c3c"
-            elif ratio < 0.7: return "高风险",   "#e67e22"
-            elif ratio < 0.85:return "中等风险", "#f1c40f"
-            else:             return "正常",     "#2ecc71"
+            if ratio < 0.4:    return "极高风险", "#e74c3c"
+            elif ratio < 0.7:  return "高风险",   "#e67e22"
+            elif ratio < 0.85: return "中等风险", "#f1c40f"
+            else:              return "正常",     "#2ecc71"
 
         async def fetch():
             url = "wss://stream.aisstream.io/v0/stream"
@@ -508,7 +528,9 @@ def update_ais():
             }
             counts = {name: 0 for name in AIS_CHOKEPOINTS}
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=30, close_timeout=10) as ws:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=30, close_timeout=10
+                ) as ws:
                     await ws.send(json.dumps(subscribe_msg))
                     start = time.time()
                     while time.time() - start < 120:
@@ -521,7 +543,8 @@ def update_ais():
                             lat  = pos.get("Latitude",  0)
                             lon  = pos.get("Longitude", 0)
                             for name, box in AIS_CHOKEPOINTS.items():
-                                if box["min_lat"] <= lat <= box["max_lat"] and box["min_lon"] <= lon <= box["max_lon"]:
+                                if (box["min_lat"] <= lat <= box["max_lat"] and
+                                        box["min_lon"] <= lon <= box["max_lon"]):
                                     counts[name] += 1
                                     break
                         except asyncio.TimeoutError:
@@ -563,15 +586,77 @@ def update_ais():
     except Exception as e:
         print(f"  失败: {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# 情感分析
-# ══════════════════════════════════════════════════════════════════════════
-def update_sentiment():
-    print("\n[情感] 增量情感分析...")
+def update_feature_matrix():
+    print("[特征矩阵] 增量更新...")
     try:
-        from sentiment_analysis import incremental_sentiment_analysis
-        incremental_sentiment_analysis(max_articles=50)
+        from train_model import load_and_merge, build_features, OPEC_DATES
+
+        raw_df = load_and_merge()
+
+        # 尝试用雅虎财经补充最新价格
+        try:
+            import yfinance as yf
+            wti   = yf.Ticker("CL=F").history(period="5d")[["Close"]].rename(columns={"Close": "WTI"})
+            brent = yf.Ticker("BZ=F").history(period="5d")[["Close"]].rename(columns={"Close": "Brent"})
+            wti.index   = pd.to_datetime(wti.index).tz_localize(None)
+            brent.index = pd.to_datetime(brent.index).tz_localize(None)
+            yf_new = wti.join(brent, how="outer")
+            yf_new = yf_new[yf_new.index > raw_df.index.max()]
+            if len(yf_new) > 0:
+                for col in raw_df.columns:
+                    if col not in ["WTI", "Brent"]:
+                        yf_new[col] = raw_df[col].iloc[-1]
+                raw_df = pd.concat([raw_df, yf_new])
+                raw_df = raw_df[~raw_df.index.duplicated(keep="last")]
+                raw_df.sort_index(inplace=True)
+                print(f"  雅虎财经补充 {len(yf_new)} 条，最新至 {raw_df.index.max().date()}")
+            else:
+                print(f"  雅虎财经无新数据，使用FRED数据截至 {raw_df.index.max().date()}")
+        except Exception as e:
+            print(f"  雅虎财经跳过: {e}")
+
+        # 带target的完整矩阵（用于训练）
+        feat, all_feature_cols, _ = build_features(raw_df, target_col="WTI", horizon=10)
+        out_path = os.path.join(ROOT_DIR, "data", "processed", "feature_matrix.csv")
+        feat.to_csv(out_path)
+        print(f"  特征矩阵已更新，共 {len(feat)} 条，截至 {feat.index.max().date()}")
+
+        # 最新特征行（无target，用于实时预测）
+        feat_full = raw_df.copy()
+        feat_full["return_1d"]   = feat_full["WTI"].pct_change(1)
+        feat_full["return_5d"]   = feat_full["WTI"].pct_change(5)
+        feat_full["return_10d"]  = feat_full["WTI"].pct_change(10)
+        feat_full["return_20d"]  = feat_full["WTI"].pct_change(20)
+        feat_full["ma_5"]        = feat_full["WTI"].rolling(5).mean()
+        feat_full["ma_20"]       = feat_full["WTI"].rolling(20).mean()
+        feat_full["ma_60"]       = feat_full["WTI"].rolling(60).mean()
+        feat_full["ma_ratio"]    = feat_full["ma_5"] / feat_full["ma_20"]
+        feat_full["ma_ratio_60"] = feat_full["ma_20"] / feat_full["ma_60"]
+        feat_full["volatility"]  = feat_full["WTI"].rolling(10).std()
+        feat_full["vol_ratio"]   = feat_full["volatility"] / feat_full["WTI"].rolling(60).std()
+        feat_full["high_vol"]    = (
+            feat_full["volatility"] > feat_full["volatility"].rolling(60).mean()
+        ).astype(int)
+        if "Brent" in feat_full.columns:
+            feat_full["wti_brent_spread"] = feat_full["WTI"] - feat_full["Brent"]
+
+        opec_dates = pd.to_datetime(OPEC_DATES)
+        feat_full["opec_flag"] = 0
+        for od in opec_dates:
+            mask = (feat_full.index >= od - pd.Timedelta(days=5)) & \
+                   (feat_full.index <= od + pd.Timedelta(days=5))
+            feat_full.loc[mask, "opec_flag"] = 1
+
+        if "gdelt_goldstein" in feat_full.columns:
+            feat_full["gdelt_goldstein_chg"] = feat_full["gdelt_goldstein"].diff(5)
+            feat_full["gdelt_conflict_ma5"]  = feat_full["gdelt_conflict_cnt"].rolling(5).mean()
+            feat_full["gdelt_tone_chg"]      = feat_full["gdelt_tone"].diff(3)
+
+        latest_row  = feat_full[all_feature_cols].ffill().dropna().tail(1)
+        latest_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
+        latest_row.to_csv(latest_path)
+        print(f"  最新预测特征已保存，日期：{latest_row.index[-1].date()}")
+
     except Exception as e:
         print(f"  失败: {e}")
 
@@ -585,11 +670,14 @@ def run_update():
     print("="*50)
     update_oil_prices()
     update_macro_data()
+    update_gdelt()
     update_news_api()
     update_news_rss()
     update_sentiment()
     update_portwatch()
-    update_ais()
+    update_feature_matrix()
+    # AIS单独手动跑，不在自动流程里（耗时120秒）
+    # update_ais()
     print("\n" + "="*50)
     print("全部更新完成！")
     print("="*50 + "\n")

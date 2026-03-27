@@ -426,8 +426,7 @@ def auto_update_data():
 with st.spinner("正在检查数据更新..."):
     auto_update_data()
 
-
-@st.cache_date(ttl=84600)
+@st.cache_data(ttl=84600)
 def load_assets():
     feat = pd.read_csv(
         os.path.join(ROOT_DIR, "data", "processed", "feature_matrix.csv"),
@@ -474,20 +473,30 @@ def get_black_swan_status():
         return False, {"error": str(e)}
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def get_chokepoint_status():
-    """获取各咽喉点当前状态"""
+    """获取各咽喉点当前状态，AIS有覆盖时优先用AIS数据"""
+    import json
+
     df = load_portwatch()
     if df is None:
         return {}
 
+    # 加载AIS快照
+    ais_data = {}
+    ais_path = os.path.join(ROOT_DIR, "data", "raw", "ais_snapshot.json")
+    if os.path.exists(ais_path):
+        with open(ais_path, "r", encoding="utf-8") as f:
+            ais_data = json.load(f)
+
     cp_map = {
-        "cp6" : {"name": "霍尔木兹", "importance": "全球20%石油"},
-        "cp4" : {"name": "曼德海峡", "importance": "红海通道"},
-        "cp1" : {"name": "苏伊士运河", "importance": "欧亚航线"},
-        "cp5" : {"name": "马六甲", "importance": "亚洲石油"},
-        "cp3" : {"name": "博斯普鲁斯", "importance": "俄油出口"},
-        "cp11": {"name": "台湾海峡", "importance": "亚太航运"},
-        "cp7" : {"name": "好望角", "importance": "绕行路线"},
+        "cp6" : {"name": "霍尔木兹", "importance": "全球20%石油",  "ais_name": "霍尔木兹海峡"},
+        "cp4" : {"name": "曼德海峡", "importance": "红海通道",     "ais_name": "曼德海峡"},
+        "cp1" : {"name": "苏伊士运河","importance": "欧亚航线",    "ais_name": "苏伊士运河"},
+        "cp5" : {"name": "马六甲",   "importance": "亚洲石油",     "ais_name": "马六甲海峡"},
+        "cp3" : {"name": "博斯普鲁斯","importance": "俄油出口",    "ais_name": "博斯普鲁斯海峡"},
+        "cp11": {"name": "台湾海峡", "importance": "亚太航运",     "ais_name": None},
+        "cp7" : {"name": "好望角",   "importance": "绕行路线",     "ais_name": None},
     }
 
     status = {}
@@ -495,32 +504,73 @@ def get_chokepoint_status():
         col = f"{cp}_tanker"
         if col not in df.columns:
             continue
-        series   = df[col].dropna()
+        series = df[col].dropna()
         if len(series) < 2:
             continue
-        latest   = series.iloc[-1]
-        avg_90d  = series.tail(90).mean()
-        ratio    = latest / avg_90d if avg_90d > 0 else 1.0
-        last_date = str(series.index[-1].date())
 
-        if ratio < 0.3:
-            risk, color = "极高风险", "#e74c3c"
-        elif ratio < 0.6:
-            risk, color = "高风险",   "#e67e22"
-        elif ratio < 0.85:
-            risk, color = "偏低",     "#f1c40f"
+        # PortWatch基础数据
+        pw_latest   = int(series.iloc[-1])
+        avg_90d     = series.tail(90).mean()
+        pw_ratio    = pw_latest / avg_90d if avg_90d > 0 else 1.0
+        last_date   = str(series.index[-1].date())
+
+        def _risk_color(ratio):
+            if ratio < 0.3:   return "极高风险", "#e74c3c"
+            elif ratio < 0.6: return "高风险",   "#e67e22"
+            elif ratio < 0.85:return "偏低",     "#f1c40f"
+            else:             return "正常",     "#2ecc71"
+
+        pw_risk, pw_color = _risk_color(pw_ratio)
+
+        # AIS数据融合
+        ais_entry    = ais_data.get(info["ais_name"]) if info["ais_name"] else None
+        has_ais      = ais_entry and ais_entry.get("ais_coverage", False)
+
+        if has_ais:
+            ais_count    = ais_entry["count"]
+            ais_normal   = ais_entry["normal_count"]
+            ais_ratio    = ais_count / ais_normal if ais_normal > 0 else 1.0
+            ais_risk, ais_color = _risk_color(ais_ratio)
+            ais_ratio_pct = round(ais_ratio * 100, 1)
+            ais_timestamp = ais_entry.get("timestamp", "")
+
+            # 取两者中风险更高的作为主显示
+            risk_priority = {"极高风险": 4, "高风险": 3, "偏低": 2, "正常": 1}
+            if risk_priority.get(ais_risk, 0) >= risk_priority.get(pw_risk, 0):
+                main_risk  = ais_risk
+                main_color = ais_color
+            else:
+                main_risk  = pw_risk
+                main_color = pw_color
         else:
-            risk, color = "正常",     "#2ecc71"
+            ais_count     = None
+            ais_ratio_pct = None
+            ais_risk      = None
+            ais_color     = None
+            ais_timestamp = None
+            main_risk     = pw_risk
+            main_color    = pw_color
 
         status[cp] = {
-            "name"          : info["name"],
-            "importance"    : info["importance"],
-            "latest"        : int(latest),
-            "avg_90d"       : round(avg_90d, 1),
-            "ratio"         : round(ratio * 100, 1),
-            "risk"          : risk,
-            "color"         : color,
-            "last_date"     : last_date,
+            "name"         : info["name"],
+            "importance"   : info["importance"],
+            # PortWatch
+            "latest"       : pw_latest,
+            "avg_90d"      : round(avg_90d, 1),
+            "ratio"        : round(pw_ratio * 100, 1),
+            "risk"         : pw_risk,
+            "color"        : pw_color,
+            "last_date"    : last_date,
+            # AIS
+            "has_ais"      : has_ais,
+            "ais_count"    : ais_count,
+            "ais_ratio"    : ais_ratio_pct,
+            "ais_risk"     : ais_risk,
+            "ais_color"    : ais_color,
+            "ais_timestamp": ais_timestamp,
+            # 综合
+            "main_risk"    : main_risk,
+            "main_color"   : main_color,
         }
     return status
 
@@ -574,30 +624,57 @@ def get_risk_level(low, mid, high):
     else:
         return "极低风险", "#27ae60", 1
 
+def get_country_news(country_name, n=5):
+    """从情感分析结果里提取该国相关新闻，带情感标签"""
+    # 优先读情感分析结果
+    sentiment_path = os.path.join(ROOT_DIR, "data", "processed", "news_sentiment_detail.csv")
+    news_path      = os.path.join(ROOT_DIR, "data", "raw", "news_data.csv")
 
-def get_country_news(country_name, n=3):
-    """从新闻数据里提取该国相关新闻"""
-    if len(news) == 0:
+    if os.path.exists(sentiment_path):
+        df = pd.read_csv(sentiment_path)
+    elif os.path.exists(news_path):
+        df = pd.read_csv(news_path)
+    else:
         return []
+
+    if len(df) == 0:
+        return []
+
     keywords = {
-        "伊朗": ["Iran", "Iranian"],
+        "伊朗"    : ["Iran", "Iranian"],
         "沙特阿拉伯": ["Saudi", "Riyadh", "Aramco"],
-        "俄罗斯": ["Russia", "Russian", "Moscow", "Kremlin"],
-        "伊拉克": ["Iraq", "Iraqi", "Baghdad"],
-        "美国": ["US", "America", "Washington", "Biden", "Trump"],
-        "阿联酋": ["UAE", "Dubai", "Abu Dhabi"],
-        "挪威": ["Norway", "Norwegian", "Equinor"],
+        "俄罗斯"  : ["Russia", "Russian", "Moscow", "Kremlin"],
+        "伊拉克"  : ["Iraq", "Iraqi", "Baghdad"],
+        "美国"    : ["US", "America", "Washington", "Biden", "Trump"],
+        "阿联酋"  : ["UAE", "Dubai", "Abu Dhabi"],
+        "挪威"    : ["Norway", "Norwegian", "Equinor"],
         "委内瑞拉": ["Venezuela", "Maduro"],
-        "利比亚": ["Libya", "Libyan"],
+        "利比亚"  : ["Libya", "Libyan"],
         "尼日利亚": ["Nigeria", "Nigerian"],
-        "科威特": ["Kuwait"],
+        "科威特"  : ["Kuwait"],
         "哈萨克斯坦": ["Kazakhstan"],
         "阿尔及利亚": ["Algeria"],
     }
-    kws = keywords.get(country_name, [country_name])
-    mask = news["title"].str.contains("|".join(kws), case=False, na=False)
-    filtered = news[mask].head(n)
-    return filtered[["date", "title", "source", "url"]].to_dict("records")
+
+    kws  = keywords.get(country_name, [country_name])
+    mask = df["title"].str.contains("|".join(kws), case=False, na=False)
+    filtered = df[mask].sort_values("date", ascending=False).head(n)
+
+    results = []
+    for _, row in filtered.iterrows():
+        results.append({
+            "date"           : str(row.get("date", ""))[:10],
+            "title"          : str(row.get("title", "")),
+            "source"         : str(row.get("source", "")),
+            "url"            : str(row.get("url", "")),
+            "sentiment"      : str(row.get("sentiment", "neutral")),
+            "score"          : float(row.get("score", 0)) if "score" in row else 0.0,
+            "confidence"     : float(row.get("confidence", 0)) if "confidence" in row else 0.0,
+            "event_type"     : str(row.get("event_type", "other")) if "event_type" in row else "other",
+            "impact_duration": str(row.get("impact_duration", "short")) if "impact_duration" in row else "short",
+            "reason"         : str(row.get("reason", "")) if "reason" in row else "",
+        })
+    return results
 
 
 with st.sidebar:
@@ -835,159 +912,81 @@ if page == "全球能源地图":
         )
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True,key="chart_pred")
     # ── 咽喉点航运状态面板 ────────────────────────────────────────────────
     st.divider()
     st.subheader("全球关键咽喉点实时状态")
-    # 加载两个数据源
-    cp_status = get_chokepoint_status()  # PortWatch
-    ais_path = os.path.join(ROOT_DIR, "data", "raw", "ais_snapshot.json")
-    ais_data = {}
-    if os.path.exists(ais_path):
-        import json
+    st.caption("PortWatch 历史趋势（90日均值对比）· AIS实时信号融合")
 
-        with open(ais_path, "r", encoding="utf-8") as f:
-            ais_data = json.load(f)
+    cp_status = get_chokepoint_status()
 
-
-    # 融合数据源，AIS有覆盖且数据可信时优先用AIS
-    def get_merged_status(cp_status, ais_data):
-        merged = {}
-        for cp, s in cp_status.items():
-            name = s["name"]
-            entry = s.copy()
-            # 找对应的AIS数据
-            ais = ais_data.get(name)
-            if ais and ais.get("ais_coverage", False):
-                entry["source"] = "AIS 实时"
-                entry["source_color"] = "#3498db"
-                entry["ais_count"] = ais["count"]
-                entry["ais_risk"] = ais["risk"]
-                entry["ais_color"] = ais["color"]
-                entry["timestamp"] = ais["timestamp"]
-            else:
-                entry["source"] = "PortWatch"
-                entry["source_color"] = "#c9a96e"
-                entry["ais_count"] = None
-                entry["ais_risk"] = None
-                entry["ais_color"] = None
-                entry["timestamp"] = s.get("last_date", "")
-            merged[cp] = entry
-        return merged
-
-
-    merged = get_merged_status(cp_status, ais_data) if cp_status else {}
-
-    if merged:
-        # 第一行：PortWatch历史趋势卡片
-        st.caption("PortWatch 历史趋势（90日均值对比）· 每周二更新")
-        cols = st.columns(len(merged))
-        for i, (cp, s) in enumerate(merged.items()):
+    if cp_status:
+        cols = st.columns(len(cp_status))
+        for i, (cp, s) in enumerate(cp_status.items()):
             with cols[i]:
-                # 主色
-                border_color = s["color"]
-                risk_label = s["risk"]
-                ratio = s["ratio"]
-                latest = s["latest"]
-                avg_90d = s["avg_90d"]
+                if s["has_ais"] and s["ais_count"] is not None:
+                    ais_badge = (
+                        "<div style=\"background:rgba(52,152,219,0.15);"
+                        "border:1px solid #3498db;border-radius:4px;"
+                        "padding:2px 6px;font-size:9px;color:#3498db;"
+                        "font-weight:600;margin-bottom:4px;display:inline-block;\">"
+                        f"● AIS实时 · {s['ais_count']}艘 · {s['ais_ratio']}%"
+                        "</div>"
+                    )
+                else:
+                    ais_badge = (
+                        "<div style=\"background:rgba(100,100,100,0.1);"
+                        "border:1px solid #444;border-radius:4px;"
+                        "padding:2px 6px;font-size:9px;color:#555;"
+                        "font-weight:600;margin-bottom:4px;display:inline-block;\">"
+                        "PortWatch"
+                        "</div>"
+                    )
 
-                # 如果AIS也有数据，风险取两者中较高的
-                if s["ais_risk"] and s["ais_risk"] not in ["数据不足", "未知"]:
-                    risk_priority = {"极高风险": 4, "高风险": 3, "偏低": 2, "中等风险": 2, "正常": 1}
-                    if risk_priority.get(s["ais_risk"], 0) > risk_priority.get(risk_label, 0):
-                        border_color = s["ais_color"]
-                        risk_label = s["ais_risk"]
+                if s["has_ais"] and s["ais_timestamp"]:
+                    ts_text = f"AIS · {s['ais_timestamp'][:16]} | PW · {s['last_date']}"
+                    ts_color = "#3498db"
+                else:
+                    ts_text = f"PortWatch · {s['last_date']}"
+                    ts_color = "#c9a96e"
 
-                st.markdown(f"""
-                <div style='
-                    background: linear-gradient(135deg, #0f1520 0%, #1a2332 100%);
-                    border: 1px solid {border_color};
-                    border-radius: 10px;
-                    padding: 12px 10px;
-                    text-align: center;
-                    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-                    margin-bottom: 8px;
-                '>
-                    <div style='color:{border_color};font-weight:700;font-size:12px;
-                                letter-spacing:0.05em;margin-bottom:6px;'>
-                        {s["name"]}
-                    </div>
-                    <div style='color:#e8c97a;font-size:24px;font-weight:800;
-                                letter-spacing:-0.02em;'>
-                        {latest}
-                    </div>
-                    <div style='color:#6a5a3a;font-size:10px;margin:2px 0 6px;'>
-                        油轮/日 · 均值 {avg_90d}
-                    </div>
-                    <div style='
-                        background:{border_color};
-                        color:white;
-                        border-radius:4px;
-                        padding:2px 8px;
-                        font-size:11px;
-                        font-weight:600;
-                        display:inline-block;
-                        margin-bottom:6px;
-                    '>
-                        {risk_label} · {ratio}%
-                    </div>
-                    <div style='color:#4a3f28;font-size:9px;margin-top:4px;
-                                line-height:1.3;'>
-                        {s["importance"]}
-                    </div>
-                    <div style='
-                        margin-top:6px;
-                        padding-top:6px;
-                        border-top:1px solid rgba(255,255,255,0.05);
-                        color:{s["source_color"]};
-                        font-size:9px;
-                        font-weight:600;
-                        letter-spacing:0.08em;
-                    '>
-                        {s["source"]} · {s["timestamp"]}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                card_html = (
+                        "<div style=\""
+                        f"background:linear-gradient(135deg,#0f1520 0%,#1a2332 100%);"
+                        f"border:1px solid {s['main_color']};"
+                        "border-radius:10px;padding:12px 10px;text-align:center;"
+                        "box-shadow:0 4px 16px rgba(0,0,0,0.4);margin-bottom:8px;\">"
 
-        # 第二行：AIS实时数据（只显示有覆盖的）
-        ais_covered = {k: v for k, v in merged.items() if v["ais_count"] is not None}
-        if ais_covered:
-            st.caption("AIS 实时船舶信号（120秒窗口统计）")
-            cols2 = st.columns(len(ais_covered))
-            for i, (cp, s) in enumerate(ais_covered.items()):
-                with cols2[i]:
-                    ais_ratio = round(s["ais_count"] / s["latest"] * 100, 1) if s["latest"] > 0 else 0
-                    st.markdown(f"""
-                    <div style='
-                        background: rgba(52,152,219,0.06);
-                        border: 1px solid rgba(52,152,219,0.3);
-                        border-radius: 8px;
-                        padding: 10px;
-                        text-align: center;
-                    '>
-                        <div style='color:#3498db;font-size:10px;font-weight:600;
-                                    letter-spacing:0.08em;margin-bottom:4px;'>
-                            {s["name"]} · AIS实时
-                        </div>
-                        <div style='color:#e8c97a;font-size:20px;font-weight:700;'>
-                            {s["ais_count"]}
-                        </div>
-                        <div style='color:#6a5a3a;font-size:9px;margin:2px 0 4px;'>
-                            艘次 / 120秒窗口
-                        </div>
-                        <div style='
-                            background:{s["ais_color"]};
-                            color:white;
-                            border-radius:4px;
-                            padding:2px 6px;
-                            font-size:10px;
-                            font-weight:600;
-                            display:inline-block;
-                        '>
-                            {s["ais_risk"]}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        f"<div style=\"color:{s['main_color']};font-weight:700;"
+                        "font-size:12px;letter-spacing:0.05em;margin-bottom:4px;\">"
+                        f"{s['name']}</div>"
+
+                        + ais_badge +
+
+                        "<div style=\"color:#e8c97a;font-size:22px;font-weight:800;"
+                        "letter-spacing:-0.02em;margin:4px 0 2px;\">"
+                        f"{s['latest']}</div>"
+
+                        "<div style=\"color:#6a5a3a;font-size:10px;margin-bottom:6px;\">"
+                        f"油轮/日 · 90日均值 {s['avg_90d']}</div>"
+
+                        f"<div style=\"background:{s['main_color']};color:white;"
+                        "border-radius:4px;padding:2px 8px;font-size:11px;"
+                        "font-weight:600;display:inline-block;margin-bottom:6px;\">"
+                        f"{s['main_risk']} · {s['ratio']}%</div>"
+
+                        "<div style=\"color:#4a3f28;font-size:9px;"
+                        "margin-top:4px;line-height:1.3;\">"
+                        f"{s['importance']}</div>"
+
+                        "<div style=\"margin-top:6px;padding-top:6px;"
+                        "border-top:1px solid rgba(255,255,255,0.05);"
+                        f"color:{ts_color};font-size:9px;font-weight:500;\">"
+                        f"{ts_text}</div>"
+
+                        "</div>"
+                )
+                st.markdown(card_html, unsafe_allow_html=True)
     else:
         st.caption("PortWatch 数据未加载，运行 python fetch_portwatch.py 生成")
 
@@ -1058,20 +1057,101 @@ if page == "全球能源地图":
     country_news = get_country_news(selected, n=5)
     if country_news:
         st.markdown("#### 相关新闻信号")
+
+        SENTIMENT_CFG = {
+            "bullish": {"label": "看涨", "color": "#2ecc71", "bg": "rgba(46,204,113,0.1)", "icon": "▲"},
+            "bearish": {"label": "看跌", "color": "#e74c3c", "bg": "rgba(231,76,60,0.1)", "icon": "▼"},
+            "neutral": {"label": "中性", "color": "#95a5a6", "bg": "rgba(149,165,166,0.1)", "icon": "●"},
+        }
+        EVENT_LABEL = {
+            "geopolitics": "地缘政治",
+            "supply": "供应",
+            "demand": "需求",
+            "policy": "政策",
+            "macro": "宏观",
+            "other": "其他",
+        }
+        DURATION_LABEL = {
+            "short": "短期",
+            "medium": "中期",
+            "long": "长期",
+        }
+
         for item in country_news:
-            source_badge = "📡 " + str(item.get("source", ""))
+            sent = item.get("sentiment", "neutral")
+            cfg = SENTIMENT_CFG.get(sent, SENTIMENT_CFG["neutral"])
+            score = item.get("score", 0.0)
+            conf = item.get("confidence", 0.0)
+            etype = EVENT_LABEL.get(item.get("event_type", "other"), "其他")
+            duration = DURATION_LABEL.get(item.get("impact_duration", "short"), "短期")
+            reason = item.get("reason", "")
             url = item.get("url", "")
-            title = str(item.get("title", ""))
-            date = str(item.get("date", ""))
-            if url:
-                st.markdown(
-                    "- **​" + date + "​** &nbsp; [" + title + "](" + url + ")  `" +
-                    source_badge + "`"
-                )
-            else:
-                st.markdown(
-                    "- **​" + date + "​** &nbsp;" + title + "  `" + source_badge + "`"
-                )
+            title = item.get("title", "")
+            date = item.get("date", "")
+            source = item.get("source", "")
+
+            # 评分条宽度
+            bar_width = int(abs(score) * 100)
+            bar_color = cfg["color"]
+
+            title_html = (
+                f'<a href="{url}" target="_blank" style="color:#e8c97a;'
+                f'text-decoration:none;font-weight:600;font-size:13px;line-height:1.4;">'
+                f'{title}</a>'
+                if url else
+                f'<span style="color:#e8c97a;font-weight:600;font-size:13px;">{title}</span>'
+            )
+
+            card = (
+                    f"<div style=\"background:{cfg['bg']};border:1px solid {cfg['color']};"
+                    "border-radius:10px;padding:12px 14px;margin-bottom:10px;\">"
+
+                    # 标题行
+                    f"<div style=\"margin-bottom:8px;\">{title_html}</div>"
+
+                    # 标签行
+                    "<div style=\"display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;\">"
+
+                    # 情感标签
+                    f"<span style=\"background:{cfg['color']};color:white;border-radius:4px;"
+                    f"padding:2px 8px;font-size:11px;font-weight:700;\">"
+                    f"{cfg['icon']} {cfg['label']}</span>"
+
+                    # 事件类型
+                    f"<span style=\"background:rgba(200,146,42,0.2);color:#c8922a;border-radius:4px;"
+                    f"padding:2px 8px;font-size:11px;font-weight:600;\">{etype}</span>"
+
+                    # 影响周期
+                    f"<span style=\"background:rgba(255,255,255,0.05);color:#888;border-radius:4px;"
+                    f"padding:2px 8px;font-size:11px;\">{duration}</span>"
+
+                    # 来源和日期
+                    f"<span style=\"color:#555;font-size:11px;margin-left:auto;\">"
+                    f"{source} · {date}</span>"
+
+                    "</div>"
+
+                    # 评分条
+                    "<div style=\"margin-bottom:6px;\">"
+                    "<div style=\"background:rgba(255,255,255,0.05);border-radius:4px;height:4px;\">"
+                    f"<div style=\"background:{bar_color};width:{bar_width}%;height:4px;"
+                    "border-radius:4px;\"></div>"
+                    "</div>"
+                    f"<div style=\"color:#555;font-size:9px;margin-top:2px;\">"
+                    f"影响强度 {score:+.2f} · 置信度 {int(conf * 100)}%</div>"
+                    "</div>"
+
+                    # 分析原因
+                    + (
+                        f"<div style=\"color:#777;font-size:11px;font-style:italic;"
+                        f"border-top:1px solid rgba(255,255,255,0.05);padding-top:6px;\">"
+                        f"{reason}</div>"
+                        if reason and reason != "analysis failed" else ""
+                    ) +
+
+                    "</div>"
+            )
+            st.markdown(card, unsafe_allow_html=True)
     else:
         st.caption("暂无该国相关新闻数据")
 
@@ -1251,226 +1331,293 @@ elif page == "市场概览":
     # 最新新闻
     if len(news) > 0:
         st.subheader("最新市场新闻")
-        latest_news = news.sort_values("date", ascending=False).head(8)
-        for _, row in latest_news.iterrows():
-            url = row.get("url", "")
+
+        # 优先读情感分析结果
+        sentiment_path = os.path.join(ROOT_DIR, "data", "processed", "news_sentiment_detail.csv")
+        if os.path.exists(sentiment_path):
+            news_display = pd.read_csv(sentiment_path)
+            has_sentiment = True
+        else:
+            news_display = news.copy()
+            has_sentiment = False
+
+        news_display = news_display.sort_values("date", ascending=False).head(8)
+
+        SENTIMENT_CFG = {
+            "bullish": {"label": "看涨", "color": "#2ecc71", "bg": "rgba(46,204,113,0.08)", "icon": "▲",
+                        "bar": "#2ecc71"},
+            "bearish": {"label": "看跌", "color": "#e74c3c", "bg": "rgba(231,76,60,0.08)", "icon": "▼",
+                        "bar": "#e74c3c"},
+            "neutral": {"label": "中性", "color": "#95a5a6", "bg": "rgba(149,165,166,0.06)", "icon": "●",
+                        "bar": "#95a5a6"},
+        }
+        EVENT_LABEL = {
+            "geopolitics": "地缘政治", "supply": "供应",
+            "demand": "需求", "policy": "政策",
+            "macro": "宏观", "other": "其他",
+        }
+
+        for _, row in news_display.iterrows():
+            url = str(row.get("url", ""))
             title = str(row.get("title", ""))
-            src = str(row.get("source", ""))
-            date = str(row.get("date", ""))
-            if url:
-                st.markdown("- **​" + date + "​** &nbsp; [" + title + "](" + url + ")  `" + src + "`")
+            source = str(row.get("source", ""))
+            date = str(row.get("date", ""))[:10]
+            desc = str(row.get("description", ""))[:120] if row.get("description") else ""
+
+            if has_sentiment:
+                sent = str(row.get("sentiment", "neutral"))
+                cfg = SENTIMENT_CFG.get(sent, SENTIMENT_CFG["neutral"])
+                score = float(row.get("score", 0)) if pd.notna(row.get("score")) else 0.0
+                conf = float(row.get("confidence", 0)) if pd.notna(row.get("confidence")) else 0.0
+                etype = EVENT_LABEL.get(str(row.get("event_type", "other")), "其他")
+                reason = str(row.get("reason", ""))
+                bar_w = int(abs(score) * 100)
             else:
-                st.markdown("- **​" + date + "​** &nbsp;" + title + "  `" + src + "`")
+                cfg = SENTIMENT_CFG["neutral"]
+                score = 0.0
+                conf = 0.0
+                etype = "其他"
+                reason = ""
+                bar_w = 0
+
+            title_html = (
+                f'<a href="{url}" target="_blank" style="color:#e8c97a;'
+                f'text-decoration:none;font-weight:600;font-size:13px;line-height:1.5;">'
+                f'{title}</a>'
+                if url else
+                f'<span style="color:#e8c97a;font-weight:600;font-size:13px;">{title}</span>'
+            )
+
+            desc_html = (
+                f'<div style="color:#666;font-size:11px;margin:4px 0 6px;'
+                f'line-height:1.4;">{desc}...</div>'
+                if desc else ""
+            )
+
+            reason_html = (
+                f'<div style="color:#666;font-size:11px;font-style:italic;'
+                f'border-top:1px solid rgba(255,255,255,0.04);padding-top:6px;margin-top:4px;">'
+                f'{reason}</div>'
+                if reason and reason not in ["analysis failed", "nan"] else ""
+            )
+
+            card = (
+                    f'<div style="background:{cfg["bg"]};'
+                    f'border-left:3px solid {cfg["color"]};'
+                    'border-radius:0 8px 8px 0;'
+                    'padding:12px 14px;margin-bottom:8px;">'
+
+                    f'<div style="margin-bottom:6px;">{title_html}</div>'
+
+                    + desc_html +
+
+                    '<div style="display:flex;gap:6px;flex-wrap:wrap;'
+                    'align-items:center;margin-bottom:6px;">'
+
+                    + (
+                        f'<span style="background:{cfg["color"]};color:white;'
+                        f'border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700;">'
+                        f'{cfg["icon"]} {cfg["label"]}</span>'
+                        f'<span style="background:rgba(200,146,42,0.15);color:#c8922a;'
+                        f'border-radius:4px;padding:1px 7px;font-size:11px;">{etype}</span>'
+                        if has_sentiment else ""
+                    ) +
+
+                    f'<span style="color:#555;font-size:11px;margin-left:auto;">'
+                    f'{source} · {date}</span>'
+                    '</div>'
+
+                    + (
+                        f'<div style="background:rgba(255,255,255,0.04);'
+                        f'border-radius:3px;height:3px;margin-bottom:3px;">'
+                        f'<div style="background:{cfg["bar"]};width:{bar_w}%;'
+                        f'height:3px;border-radius:3px;"></div></div>'
+                        f'<div style="color:#444;font-size:9px;">'
+                        f'影响强度 {score:+.2f} · 置信度 {int(conf * 100)}%</div>'
+                        if has_sentiment and bar_w > 0 else ""
+                    ) +
+
+                    reason_html +
+
+                    '</div>'
+            )
+            st.markdown(card, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════
 # 页面三：风险预测
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "风险预测":
     st.title("风险预测")
-    st.caption("未来10日 WTI 原油价格涨跌幅风险区间预测")
+    st.caption("未来10日 WTI 原油价格涨跌幅预测")
 
-    last_low = pred_df["pred_enhanced_low"].iloc[-1]
-    last_mid = pred_df["pred_enhanced_mid"].iloc[-1]
-    last_high = pred_df["pred_enhanced_high"].iloc[-1]
+    rt_price, rt_date, rt_live = get_realtime_price()
+
+    # ── 第一层：统计模型预测 ──────────────────────────────────────────
+    try:
+        last_low   = pred_df["pred_enhanced_low"].iloc[-1]
+        last_mid   = pred_df["pred_enhanced_mid"].iloc[-1]
+        last_high  = pred_df["pred_enhanced_high"].iloc[-1]
+        model_mode = "统计模型（Enhanced XGBoost）"
+    except:
+        last_low, last_mid, last_high = -0.05, 0.01, 0.05
+        model_mode = "默认预测"
+
+    # ── 第二层：极端事件放大 ──────────────────────────────────────────
+    extreme_active = False
+    try:
+        latest_feat_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
+        latest_feat      = pd.read_csv(latest_feat_path, index_col=0, parse_dates=True)
+        latest_row       = latest_feat.iloc[-1]
+        vol_ratio        = float(latest_row.get("vol_ratio", 1))
+        vix              = float(latest_row.get("VIX", 20))
+        if vol_ratio > 1.5 or vix > 28:
+            extreme_active = True
+    except:
+        pass
+
+    if is_black_swan:
+        extreme_active = True
+
+    if extreme_active:
+        last_low   = last_low  * 2.5
+        last_high  = last_high * 3.0
+        model_mode = "极端事件放大模式"
+
     risk_label, risk_color, _ = get_risk_level(last_low, last_mid, last_high)
 
-    # ── 黑天鹅期间：显示 AI 情景分析，隐藏统计模型预测 ──────────────────
-    # 手动覆盖开关（侧边栏）
+    # ── 侧边栏开关 ────────────────────────────────────────────────────
     with st.sidebar:
         st.divider()
         manual_override = st.toggle(
-            "手动关闭黑天鹅模式",
-            value=False,
+            "手动关闭黑天鹅模式", value=False,
             help="当您判断极端事件已解除时，可手动关闭黑天鹅预警"
         )
         if manual_override:
             is_black_swan = False
 
+    # ── 状态提示 ──────────────────────────────────────────────────────
     if is_black_swan:
-        st.error(
-            "当前处于极端地缘政治事件期间（霍尔木兹封锁），"
-            "统计模型预测已暂停。以下为 AI 情景分析结果。"
-        )
+        st.error("当前处于极端地缘政治事件期间（霍尔木兹封锁）· 统计模型已切换至极端情景模式")
+    elif extreme_active:
+        st.warning(f"极端市场环境（波动率 {vol_ratio:.1f}x · VIX {vix:.1f}）· 置信区间已放大")
+    else:
+        st.success(f"市场处于正常波动区间 · {model_mode}")
 
-        rt_price, rt_date, rt_live = get_realtime_price()
+    # ── 核心预测数字 ──────────────────────────────────────────────────
+    col0, col1, col2, col3 = st.columns(4)
+    with col0:
+        st.metric("当前 WTI", f"${rt_price:.2f}", rt_date)
+    with col1:
+        st.markdown("#### 悲观情景 (P10)")
+        st.markdown(f"<h2 style='color:#e74c3c'>{last_low*100:.1f}%</h2>", unsafe_allow_html=True)
+        st.caption("10%概率跌幅超过此值")
+    with col2:
+        mid_color = "#2ecc71" if last_mid > 0 else "#e74c3c"
+        st.markdown("#### 基准预测 (P50)")
+        st.markdown(f"<h2 style='color:{mid_color}'>{last_mid*100:.1f}%</h2>", unsafe_allow_html=True)
+        st.caption("最可能的10日涨跌幅")
+    with col3:
+        st.markdown("#### 乐观情景 (P90)")
+        st.markdown(f"<h2 style='color:#2ecc71'>{last_high*100:.1f}%</h2>", unsafe_allow_html=True)
+        st.caption("10%概率涨幅超过此值")
 
-        # 情景价格区间可视化
+    price_low  = rt_price * (1 + last_low)
+    price_mid  = rt_price * (1 + last_mid)
+    price_high = rt_price * (1 + last_high)
+    st.caption(
+        f"对应价格区间：${price_low:.1f} ~ ${price_high:.1f}"
+        f"（中位数 ${price_mid:.1f}）· 未来10日 · {model_mode}"
+    )
+
+    st.divider()
+
+    # ── 黑天鹅：AI情景分析图 ─────────────────────────────────────────
+    if is_black_swan:
+        st.subheader("AI 情景价格区间")
         scenarios = {
-            "缓解情景\n（外交解决）": {"low": 85, "high": 95, "color": "#2ecc71"},
-            "基准情景\n（封锁持续）": {"low": 95, "high": 110, "color": "#f1c40f"},
-            "升级情景\n（冲突扩大）": {"low": 110, "high": 120, "color": "#e74c3c"},
+            "缓解情景（外交解决）": {
+                "low"  : round(rt_price * 0.88, 1),
+                "high" : round(rt_price * 0.98, 1),
+                "color": "#2ecc71",
+            },
+            "基准情景（当前延续）": {
+                "low"  : round(rt_price * 0.95, 1),
+                "high" : round(rt_price * 1.12, 1),
+                "color": "#f1c40f",
+            },
+            "升级情景（冲突扩大）": {
+                "low"  : round(rt_price * 1.10, 1),
+                "high" : round(rt_price * 1.28, 1),
+                "color": "#e74c3c",
+            },
         }
-
         fig_bs = go.Figure()
-
-        # 当前价格基准线
         fig_bs.add_hline(
-            y=rt_price,
-            line_dash="dash", line_color="white", line_width=2,
-            annotation_text=f"当前价格 ${rt_price}",
+            y=rt_price, line_dash="dash", line_color="white", line_width=2,
+            annotation_text=f"当前 ${rt_price:.1f}",
             annotation_font_color="white",
         )
-
-        for i, (label, s) in enumerate(scenarios.items()):
+        for label, s in scenarios.items():
             fig_bs.add_trace(go.Bar(
-                x=[label],
-                y=[s["high"] - s["low"]],
-                base=[s["low"]],
-                marker_color=s["color"],
-                marker_opacity=0.75,
-                name=label,
+                x=[label], y=[s["high"] - s["low"]], base=[s["low"]],
+                marker_color=s["color"], marker_opacity=0.75, name=label,
                 text=f"${s['low']} ~ ${s['high']}",
                 textposition="inside",
-                textfont=dict(color="white", size=13),
-                width=0.4,
+                textfont=dict(color="white", size=12), width=0.4,
             ))
-
         fig_bs.update_layout(
-            height=420,
-            title="未来1-2周 WTI 价格情景区间（AI 生成）",
-            margin=dict(l=0, r=0, t=40, b=0),
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
+            height=400, margin=dict(l=0, r=0, t=30, b=0),
+            plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
             font=dict(color="white"),
-            yaxis=dict(
-                gridcolor="#2d3748",
-                title="WTI 美元/桶",
-                range=[75, 130],
-            ),
+            yaxis=dict(gridcolor="#2d3748", title="WTI 美元/桶"),
             xaxis=dict(gridcolor="#2d3748"),
-            showlegend=False,
-            barmode="overlay",
+            showlegend=False, barmode="overlay",
+            title="未来1-2周 WTI 价格情景区间",
         )
-        st.plotly_chart(fig_bs, use_container_width=True)
+        st.plotly_chart(fig_bs, use_container_width=True, key="chart_bs")
 
-        # DeepSeek 分析文字
         report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
         if os.path.exists(report_path):
             import json
-
             with open(report_path, "r", encoding="utf-8") as f:
-                report = json.load(f)
-            analysis = report.get("analysis", {}).get("analysis", "")
+                bs_report = json.load(f)
+            analysis = bs_report.get("analysis", {}).get("analysis", "")
             if analysis:
                 with st.expander("查看完整 AI 情景分析", expanded=False):
                     st.markdown(analysis)
-                    st.caption("生成时间：" +
-                               report.get("analysis", {}).get("generated_at", ""))
+                    st.caption("生成时间：" + bs_report.get("analysis", {}).get("generated_at", ""))
 
         st.divider()
         st.subheader("封锁期间油价走势")
-        # 显示封锁前后的实际价格走势
-        recent = pred_df["2026-01-01":]
-        fig_wti = go.Figure()
+        recent_bs = pred_df["2026-01-01":]
+        fig_wti   = go.Figure()
         fig_wti.add_trace(go.Scatter(
-            x=recent.index, y=recent["WTI"],
-            name="WTI 实际价格",
-            line=dict(color="#3498db", width=2)
+            x=recent_bs.index, y=recent_bs["WTI"],
+            name="WTI 实际价格", line=dict(color="#3498db", width=2)
         ))
-        import pandas as pd
-
         fig_wti.add_vline(
             x=pd.Timestamp("2026-03-02").timestamp() * 1000,
             line_dash="dash", line_color="#e74c3c",
-            annotation_text="霍尔木兹封锁",
-            annotation_font_color="#e74c3c",
+            annotation_text="霍尔木兹封锁", annotation_font_color="#e74c3c",
         )
-
         fig_wti.update_layout(
-            height=320,
-            margin=dict(l=0, r=0, t=10, b=0),
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
+            plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
             font=dict(color="white"),
             xaxis=dict(gridcolor="#2d3748"),
             yaxis=dict(gridcolor="#2d3748", title="美元/桶"),
         )
-        st.plotly_chart(fig_wti, use_container_width=True)
+        st.plotly_chart(fig_wti, use_container_width=True, key="chart_wti")
         st.divider()
-        st.subheader("极端事件深度分析报告")
-        st.caption("由 DeepSeek 生成 · 包含情景价格预测、行业冲击信号、对冲操作建议")
 
-        col_btn1, col_btn2 = st.columns([1, 3])
-        with col_btn1:
-            gen_bs_report = st.button(
-                "生成极端事件报告",
-                type="primary",
-                use_container_width=True
-            )
-        with col_btn2:
-            report_path = os.path.join(ROOT_DIR, "data", "raw", "latest_report.json")
-            if os.path.exists(report_path):
-                show_bs_cache = st.button("查看上次报告", use_container_width=True)
-            else:
-                show_bs_cache = False
-
-        if gen_bs_report:
-            with st.spinner("正在生成极端事件深度分析，约需15-25秒..."):
-                try:
-                    from report_generator import generate_report
-                    recent_news_list = news.to_dict("records") if len(news) > 0 else []
-                    result = generate_report(
-                        current_price      = rt_price,
-                        pred_low           = last_low,
-                        pred_mid           = last_mid,
-                        pred_high          = last_high,
-                        feature_importance = importance,
-                        is_black_swan      = True,
-                        bs_signals         = bs_signals,
-                        recent_news        = recent_news_list,
-                    )
-                    if result["status"] == "ok":
-                        st.success("报告生成成功 ｜ " + result["generated_at"])
-                        st.markdown(result["report"])
-                        st.download_button(
-                            label     = "下载报告（TXT）",
-                            data      = result["report"].encode("utf-8"),
-                            file_name = "OilSense_BlackSwan_{}.txt".format(
-                                datetime.now().strftime("%Y%m%d_%H%M")
-                            ),
-                            mime      = "text/plain",
-                        )
-                    else:
-                        st.error("生成失败：" + result.get("error", ""))
-                except Exception as e:
-                    st.error("调用失败：" + str(e))
-
-        elif os.path.exists(report_path) and show_bs_cache:
-            import json
-            with open(report_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            st.markdown(cached.get("report", ""))
-
-
-    else:
-        # ── 正常市场：显示统计模型预测 ──────────────────────────────────
-        col1, col2, col3 = st.columns(3)
-        with col1:
-          st.markdown("#### 悲观情景（10%分位）")
-          st.markdown("<h2 style='color:#e74c3c'>" +
-                    str(round(last_low * 100, 2)) + "%</h2>", unsafe_allow_html=True)
-          st.caption("有10%概率跌幅超过此值")
-        with col2:
-          st.markdown("#### 基准预测（中位数）")
-          color = "#e74c3c" if last_mid < 0 else "#2ecc71"
-          st.markdown("<h2 style='color:" + color + "'>" +
-                    str(round(last_mid * 100, 2)) + "%</h2>", unsafe_allow_html=True)
-          st.caption("模型预测最可能的涨跌幅")
-        with col3:
-          st.markdown("#### 乐观情景（90%分位）")
-          st.markdown("<h2 style='color:#2ecc71'>" +
-                    str(round(last_high * 100, 2)) + "%</h2>", unsafe_allow_html=True)
-          st.caption("有10%概率涨幅超过此值")
-    st.divider()
+    # ── 报告生成 ──────────────────────────────────────────────────────
     st.subheader("企业银行分析报告")
     st.caption("由 DeepSeek 生成 · 面向航空、化工、能源贸易商等企业客户")
 
-    # 检查是否有缓存报告
     report_path = os.path.join(ROOT_DIR, "data", "raw", "latest_report.json")
-    has_cache = os.path.exists(report_path)
+    has_cache   = os.path.exists(report_path)
     if has_cache:
         import json
-
         with open(report_path, "r", encoding="utf-8") as f:
             cached = json.load(f)
         st.caption(
@@ -1482,36 +1629,29 @@ elif page == "风险预测":
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
         gen_report = st.button(
-            "生成最新报告",
-            type="primary",
-            use_container_width=True,
-            key="btn_gen_normal"
+            "生成最新报告", type="primary",
+            use_container_width=True, key="btn_gen_report"
         )
     with col_btn2:
-        if has_cache:
-            show_cache = st.button(
-                "查看上次报告",
-                use_container_width=True,
-                key="btn_cache_normal"
-            )
-        else:
-            show_cache = False
+        show_cache = st.button(
+            "查看上次报告", use_container_width=True,
+            key="btn_cache_report"
+        ) if has_cache else False
 
     if gen_report:
         with st.spinner("正在调用 DeepSeek 生成分析报告，约需10-20秒..."):
             try:
                 from report_generator import generate_report
-
                 recent_news_list = news.to_dict("records") if len(news) > 0 else []
                 result = generate_report(
-                    current_price=rt_price,
-                    pred_low=last_low,
-                    pred_mid=last_mid,
-                    pred_high=last_high,
-                    feature_importance=importance,
-                    is_black_swan=is_black_swan,
-                    bs_signals=bs_signals if is_black_swan else None,
-                    recent_news=recent_news_list,
+                    current_price      = rt_price,
+                    pred_low           = last_low,
+                    pred_mid           = last_mid,
+                    pred_high          = last_high,
+                    feature_importance = importance,
+                    is_black_swan      = is_black_swan,
+                    bs_signals         = bs_signals if is_black_swan else None,
+                    recent_news        = recent_news_list,
                 )
                 if result["status"] == "ok":
                     st.success(
@@ -1519,113 +1659,114 @@ elif page == "风险预测":
                         " ｜ 生成时间：" + result["generated_at"]
                     )
                     st.markdown(result["report"])
-                    # 提供下载
                     st.download_button(
                         label="下载报告（TXT）",
                         data=result["report"].encode("utf-8"),
-                        file_name="OilSense_Report_{}.txt".format(
-                            datetime.now().strftime("%Y%m%d_%H%M")
-                        ),
-                        mime="text/plain",
-                        key="btn_download_normal"
+                        file_name=f"OilSense_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                        mime="text/plain", key="btn_dl_report"
                     )
-
                 else:
-                    st.error("报告生成失败：" + result.get("error", "未知错误"))
+                    st.error("报告生成失败：" + result.get("error", ""))
             except Exception as e:
-                st.error("调用失败：" + str(e))
-
+                st.error(f"调用失败：{e}")
     elif has_cache and show_cache:
+        st.markdown(cached.get("report", ""))
         st.download_button(
             label="下载报告（TXT）",
             data=cached.get("report", "").encode("utf-8"),
             file_name="OilSense_Report_cached.txt",
-            mime="text/plain",
-            key="btn_download_cache_normal"
+            mime="text/plain", key="btn_dl_cache"
         )
 
     st.divider()
 
+    # ── 近60日预测区间走势 ────────────────────────────────────────────
     st.subheader("近60日预测区间走势")
+    st.caption("红色阴影区域为黑天鹅事件期间，统计模型预测仅供参考")
+
     recent = pred_df.tail(60)
-    fig = go.Figure()
+    fig    = go.Figure()
     fig.add_trace(go.Scatter(
         x=list(recent.index) + list(recent.index[::-1]),
         y=list(recent["pred_enhanced_high"]) + list(recent["pred_enhanced_low"][::-1]),
-        fill="toself", fillcolor="rgba(52,152,219,0.2)",
-        line=dict(color="rgba(0,0,0,0)"), name="风险区间（10%~90%）"
+        fill="toself", fillcolor="rgba(52,152,219,0.15)",
+        line=dict(color="rgba(0,0,0,0)"), name="风险区间 P10~P90"
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["pred_enhanced_mid"],
-        name="预测中位数（Enhanced）",
-        line=dict(color="#3498db", width=2)
+        name="Enhanced预测（P50）", line=dict(color="#3498db", width=2)
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["pred_baseline_mid"],
-        name="预测中位数（Baseline）",
-        line=dict(color="#95a5a6", width=1.5, dash="dash")
+        name="Baseline预测（P50）", line=dict(color="#95a5a6", width=1.5, dash="dash")
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["target"],
-        name="实际涨跌幅",
-        line=dict(color="#e74c3c", width=1), opacity=0.7
+        name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5), opacity=0.8
     ))
-    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=0.8)
+    fig.add_hline(y=0, line_dash="solid", line_color="rgba(255,255,255,0.3)", line_width=1)
+    fig.add_vrect(
+        x0="2026-03-02", x1=str(recent.index[-1].date()),
+        fillcolor="rgba(231,76,60,0.08)", line_width=0,
+        annotation_text="黑天鹅期间", annotation_position="top left",
+        annotation_font_color="#e74c3c",
+    )
     fig.update_layout(
         height=420, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         font=dict(color="white"),
         xaxis=dict(gridcolor="#2d3748"),
         yaxis=dict(gridcolor="#2d3748", title="10日涨跌幅"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            bgcolor="rgba(0,0,0,0)", font=dict(color="white")
+        )
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="chart_hist")
 
     st.divider()
 
-    # 模型对比
+    # ── 模型性能对比 ──────────────────────────────────────────────────
     st.subheader("模型性能对比（样本外测试集）")
     test_start = pred_df.index[int(len(pred_df) * 0.8)]
-    test_df = pred_df.loc[test_start:]
-    actual = test_df["target"]
+    test_df    = pred_df.loc[test_start:]
+    actual     = test_df["target"]
 
-    results = {}
+    perf = {}
     for version in ["enhanced", "baseline"]:
-        mid = test_df["pred_" + version + "_mid"]
+        mid   = test_df[f"pred_{version}_mid"]
         valid = actual.notna() & mid.notna()
-        acc = np.mean(np.sign(mid[valid]) == np.sign(actual[valid]))
-        results[version] = round(acc * 100, 2)
+        acc   = np.mean(np.sign(mid[valid]) == np.sign(actual[valid]))
+        perf[version] = round(acc * 100, 2)
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Enhanced 方向准确率", str(results["enhanced"]) + "%",
-                  str(round(results["enhanced"] - 50, 2)) + "% vs 随机基准")
+        st.metric("Enhanced 方向准确率", f"{perf['enhanced']}%",
+                  f"+{round(perf['enhanced']-50,2)}% vs 随机基准")
     with col2:
-        st.metric("Baseline 方向准确率", str(results["baseline"]) + "%",
-                  str(round(results["baseline"] - 50, 2)) + "% vs 随机基准")
-
+        st.metric("Baseline 方向准确率", f"{perf['baseline']}%",
+                  f"+{round(perf['baseline']-50,2)}% vs 随机基准")
     with col3:
-        st.metric("测试集样本数", str(len(test_df)) + " 条")
+        st.metric("测试集样本数", f"{len(test_df)} 条")
 
     st.divider()
 
-    # 特征重要性
-    st.subheader("模型特征重要性")
+    # ── 特征重要性 ────────────────────────────────────────────────────
+    st.subheader("模型特征重要性 Top 12")
     top_imp = importance.head(12)
-    sentiment_cols = ["sentiment_score", "geopolitics_flag", "policy_flag",
-                      "news_count", "gdelt_goldstein", "gdelt_tone",
-                      "gdelt_conflict_cnt", "gdelt_coop_cnt",
-                      "gdelt_conflict_intensity", "gdelt_mentions",
-                      "gdelt_goldstein_chg", "gdelt_conflict_ma5", "gdelt_tone_chg"]
-    colors = ["#e74c3c" if f in sentiment_cols else "#3498db"
-              for f in top_imp["feature"]]
-
+    sentiment_cols = [
+        "sentiment_score", "geopolitics_flag", "policy_flag", "news_count",
+        "gdelt_goldstein", "gdelt_tone", "gdelt_conflict_cnt", "gdelt_coop_cnt",
+        "gdelt_conflict_intensity", "gdelt_mentions",
+        "gdelt_goldstein_chg", "gdelt_conflict_ma5", "gdelt_tone_chg",
+    ]
+    bar_colors = ["#e74c3c" if f in sentiment_cols else "#3498db"
+                  for f in top_imp["feature"]]
     fig2 = go.Figure(go.Bar(
         x=top_imp["importance"][::-1].values,
         y=top_imp["feature"][::-1].values,
         orientation="h",
-        marker_color=colors[::-1],
+        marker_color=bar_colors[::-1],
         text=[str(round(v, 4)) for v in top_imp["importance"][::-1].values],
         textposition="outside",
     ))
@@ -1636,8 +1777,8 @@ elif page == "风险预测":
         xaxis=dict(gridcolor="#2d3748", title="重要性得分"),
         yaxis=dict(gridcolor="#2d3748"),
     )
-    st.plotly_chart(fig2, use_container_width=True)
-    st.caption("🔴 红色 = LLM情感/GDELT地缘政治因子　🔵 蓝色 = 传统量化因子")
+    st.plotly_chart(fig2, use_container_width=True, key="chart_importance")
+    st.caption("🔴 红色 = LLM情感/GDELT地缘政治因子  🔵 蓝色 = 传统量化因子")
 
 # ══════════════════════════════════════════════════════════════════════════
 # 页面四：历史回测
