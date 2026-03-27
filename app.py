@@ -402,8 +402,32 @@ def get_country_risk():
         return {}
 
 
-# ── 加载数据和模型 ─────────────────────────────────────────────────────────
-@st.cache_resource
+@st.cache_data(ttl=86400)
+def auto_update_data():
+    try:
+        from update_daily import (
+            update_oil_prices,
+            update_macro_data,
+            update_news_api,
+            update_news_rss,
+            update_sentiment,
+            update_portwatch,
+        )
+        update_oil_prices()
+        update_macro_data()
+        update_news_api()
+        update_news_rss()
+        update_sentiment()
+        update_portwatch()
+        return datetime.now().strftime("%Y-%m-%d %H:%M")
+    except Exception as e:
+        return f"更新失败: {e}"
+
+with st.spinner("正在检查数据更新..."):
+    auto_update_data()
+
+
+@st.cache_date(ttl=84600)
 def load_assets():
     feat = pd.read_csv(
         os.path.join(ROOT_DIR, "data", "processed", "feature_matrix.csv"),
@@ -815,31 +839,155 @@ if page == "全球能源地图":
     # ── 咽喉点航运状态面板 ────────────────────────────────────────────────
     st.divider()
     st.subheader("全球关键咽喉点实时状态")
-    st.caption("数据来源：IMF PortWatch · 每周二更新 · 油轮通过量与90日均值对比")
+    # 加载两个数据源
+    cp_status = get_chokepoint_status()  # PortWatch
+    ais_path = os.path.join(ROOT_DIR, "data", "raw", "ais_snapshot.json")
+    ais_data = {}
+    if os.path.exists(ais_path):
+        import json
 
-    cp_status = get_chokepoint_status()
-    if cp_status:
-        cols = st.columns(len(cp_status))
-        for i, (cp, s) in enumerate(cp_status.items()):
+        with open(ais_path, "r", encoding="utf-8") as f:
+            ais_data = json.load(f)
+
+
+    # 融合数据源，AIS有覆盖且数据可信时优先用AIS
+    def get_merged_status(cp_status, ais_data):
+        merged = {}
+        for cp, s in cp_status.items():
+            name = s["name"]
+            entry = s.copy()
+            # 找对应的AIS数据
+            ais = ais_data.get(name)
+            if ais and ais.get("ais_coverage", False):
+                entry["source"] = "AIS 实时"
+                entry["source_color"] = "#3498db"
+                entry["ais_count"] = ais["count"]
+                entry["ais_risk"] = ais["risk"]
+                entry["ais_color"] = ais["color"]
+                entry["timestamp"] = ais["timestamp"]
+            else:
+                entry["source"] = "PortWatch"
+                entry["source_color"] = "#c9a96e"
+                entry["ais_count"] = None
+                entry["ais_risk"] = None
+                entry["ais_color"] = None
+                entry["timestamp"] = s.get("last_date", "")
+            merged[cp] = entry
+        return merged
+
+
+    merged = get_merged_status(cp_status, ais_data) if cp_status else {}
+
+    if merged:
+        # 第一行：PortWatch历史趋势卡片
+        st.caption("PortWatch 历史趋势（90日均值对比）· 每周二更新")
+        cols = st.columns(len(merged))
+        for i, (cp, s) in enumerate(merged.items()):
             with cols[i]:
-                st.markdown(
-                    f"""
-                    <div style='background:#1a2332;border:1px solid {s["color"]};
-                    border-radius:8px;padding:10px;text-align:center;'>
-                    <div style='color:{s["color"]};font-weight:bold;font-size:13px;'>
-                    {s["name"]}</div>
-                    <div style='color:white;font-size:22px;font-weight:bold;margin:4px 0;'>
-                    {s["latest"]}</div>
-                    <div style='color:#aaa;font-size:11px;'>油轮/日（均值{s["avg_90d"]}）</div>
-                    <div style='background:{s["color"]};color:white;border-radius:4px;
-                    padding:2px 6px;font-size:11px;margin-top:6px;display:inline-block;'>
-                    {s["risk"]} {s["ratio"]}%</div>
-                    <div style='color:#666;font-size:10px;margin-top:4px;'>
-                    {s["importance"]}</div>
+                # 主色
+                border_color = s["color"]
+                risk_label = s["risk"]
+                ratio = s["ratio"]
+                latest = s["latest"]
+                avg_90d = s["avg_90d"]
+
+                # 如果AIS也有数据，风险取两者中较高的
+                if s["ais_risk"] and s["ais_risk"] not in ["数据不足", "未知"]:
+                    risk_priority = {"极高风险": 4, "高风险": 3, "偏低": 2, "中等风险": 2, "正常": 1}
+                    if risk_priority.get(s["ais_risk"], 0) > risk_priority.get(risk_label, 0):
+                        border_color = s["ais_color"]
+                        risk_label = s["ais_risk"]
+
+                st.markdown(f"""
+                <div style='
+                    background: linear-gradient(135deg, #0f1520 0%, #1a2332 100%);
+                    border: 1px solid {border_color};
+                    border-radius: 10px;
+                    padding: 12px 10px;
+                    text-align: center;
+                    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+                    margin-bottom: 8px;
+                '>
+                    <div style='color:{border_color};font-weight:700;font-size:12px;
+                                letter-spacing:0.05em;margin-bottom:6px;'>
+                        {s["name"]}
                     </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                    <div style='color:#e8c97a;font-size:24px;font-weight:800;
+                                letter-spacing:-0.02em;'>
+                        {latest}
+                    </div>
+                    <div style='color:#6a5a3a;font-size:10px;margin:2px 0 6px;'>
+                        油轮/日 · 均值 {avg_90d}
+                    </div>
+                    <div style='
+                        background:{border_color};
+                        color:white;
+                        border-radius:4px;
+                        padding:2px 8px;
+                        font-size:11px;
+                        font-weight:600;
+                        display:inline-block;
+                        margin-bottom:6px;
+                    '>
+                        {risk_label} · {ratio}%
+                    </div>
+                    <div style='color:#4a3f28;font-size:9px;margin-top:4px;
+                                line-height:1.3;'>
+                        {s["importance"]}
+                    </div>
+                    <div style='
+                        margin-top:6px;
+                        padding-top:6px;
+                        border-top:1px solid rgba(255,255,255,0.05);
+                        color:{s["source_color"]};
+                        font-size:9px;
+                        font-weight:600;
+                        letter-spacing:0.08em;
+                    '>
+                        {s["source"]} · {s["timestamp"]}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # 第二行：AIS实时数据（只显示有覆盖的）
+        ais_covered = {k: v for k, v in merged.items() if v["ais_count"] is not None}
+        if ais_covered:
+            st.caption("AIS 实时船舶信号（120秒窗口统计）")
+            cols2 = st.columns(len(ais_covered))
+            for i, (cp, s) in enumerate(ais_covered.items()):
+                with cols2[i]:
+                    ais_ratio = round(s["ais_count"] / s["latest"] * 100, 1) if s["latest"] > 0 else 0
+                    st.markdown(f"""
+                    <div style='
+                        background: rgba(52,152,219,0.06);
+                        border: 1px solid rgba(52,152,219,0.3);
+                        border-radius: 8px;
+                        padding: 10px;
+                        text-align: center;
+                    '>
+                        <div style='color:#3498db;font-size:10px;font-weight:600;
+                                    letter-spacing:0.08em;margin-bottom:4px;'>
+                            {s["name"]} · AIS实时
+                        </div>
+                        <div style='color:#e8c97a;font-size:20px;font-weight:700;'>
+                            {s["ais_count"]}
+                        </div>
+                        <div style='color:#6a5a3a;font-size:9px;margin:2px 0 4px;'>
+                            艘次 / 120秒窗口
+                        </div>
+                        <div style='
+                            background:{s["ais_color"]};
+                            color:white;
+                            border-radius:4px;
+                            padding:2px 6px;
+                            font-size:10px;
+                            font-weight:600;
+                            display:inline-block;
+                        '>
+                            {s["ais_risk"]}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
     else:
         st.caption("PortWatch 数据未加载，运行 python fetch_portwatch.py 生成")
 
