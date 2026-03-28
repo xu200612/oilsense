@@ -164,6 +164,8 @@ def build_features(df, target_col="WTI", horizon=10):
         "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
         "mandeb_tanker_ma7", "mandeb_blocked",
         "cape_reroute_signal",
+        # 宏观补充
+        "US_PPI",
     ]
 
     # Baseline 特征集（仅传统量化因子）
@@ -186,8 +188,16 @@ def build_features(df, target_col="WTI", horizon=10):
 
 def train_models(feat, all_feature_cols, baseline_feature_cols):
     print("正在训练模型...")
-    X = feat[all_feature_cols]
-    y = feat["target"]
+
+    # 训练和测试只用黑天鹅之前的数据，避免极端事件污染验证集导致early stopping失效
+    # 黑天鹅期间由 extreme_scenario.py 的第二层模型负责
+    TRAIN_CUTOFF = pd.Timestamp("2026-01-01")
+    feat_train = feat[feat.index < TRAIN_CUTOFF]
+    print("  训练数据截止：" + str(TRAIN_CUTOFF.date()) +
+          "（共 " + str(len(feat_train)) + " 条，排除黑天鹅期间）")
+
+    X = feat_train[all_feature_cols]
+    y = feat_train["target"]
 
     split     = int(len(X) * 0.8)
     val_split = int(split * 0.85)
