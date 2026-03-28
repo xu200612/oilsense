@@ -1563,26 +1563,24 @@ elif page == "风险预测":
             labels = ["缓解情景", "基准情景", "升级情景"]
 
         colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
-        scenarios = {
-            labels[0]: {
-                "low" : round(rt_price * (1 + last_low), 1),    # 10日悲观价
-                "high": round(rt_price * (1 + vals[0] * 1.2), 1) if vals[0] > 0
-                        else round(rt_price * (1 + last_mid * 0.5), 1),
-                "color": colors[0],
-            },
-            labels[1]: {
-                "low" : round(rt_price * (1 + last_mid * 0.8), 1),
-                "high": round(rt_price * (1 + vals[1] * 1.2), 1) if len(vals) > 1
-                        else round(rt_price * (1 + last_high * 0.8), 1),
-                "color": colors[1],
-            },
-            labels[2]: {
-                "low" : round(rt_price * (1 + last_mid), 1),
-                "high": round(rt_price * (1 + vals[2] * 1.5), 1) if len(vals) > 2
-                        else round(rt_price * (1 + last_high * 1.5), 1),
-                "color": colors[2],
-            },
-        }
+
+        if scenarios_30d:
+            vals   = list(scenarios_30d.values())
+            labels = list(scenarios_30d.keys())
+        else:
+            vals   = [0.03, 0.08, 0.18]
+            labels = ["缓解情景", "基准情景", "升级情景"]
+
+        # 每个情景的价格区间：以当前价为基准，用30日涨跌幅推算
+        # 低端 = 当前价 × (1 + 情景涨跌幅 × 0.7)
+        # 高端 = 当前价 × (1 + 情景涨跌幅 × 1.3)
+        scenarios = {}
+        for i, (label, val) in enumerate(zip(labels, vals)):
+            low  = round(rt_price * (1 + val * 0.7), 1)
+            high = round(rt_price * (1 + val * 1.3), 1)
+            if low > high:
+                low, high = high, low
+            scenarios[label] = {"low": low, "high": high, "color": colors[i]}
         fig_bs = go.Figure()
         fig_bs.add_hline(
             y=rt_price, line_dash="dash", line_color="white", line_width=2,
