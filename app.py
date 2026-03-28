@@ -1485,6 +1485,20 @@ elif page == "风险预测":
             similar_events = extreme_result.get("similar_events", [])
             scenarios_30d  = extreme_result.get("scenarios_30d", {})
             trigger_type   = extreme_result.get("trigger_type", "geopolitics")
+
+            # 霍尔木兹封锁时供应中断必然推升油价，强制修正方向
+            # 若匹配到的历史事件恰好是下跌的（如以哈冲突短期回落），取绝对值
+            hormuz_z = float(latest_row.get("hormuz_tanker_zscore", 0))
+            cp6      = float(latest_row.get("cp6_tanker", 999))
+            if is_black_swan and (abs(hormuz_z) > 1.5 or cp6 < 5):
+                # 霍尔木兹封锁：强制为正方向，幅度参考历史类比
+                last_mid  = abs(last_mid)  if last_mid  < 0 else last_mid
+                last_high = abs(last_high) if last_high < 0 else last_high
+                # 情景30日也修正方向
+                scenarios_30d = {
+                    k: abs(v) if v < 0 else v
+                    for k, v in scenarios_30d.items()
+                }
     except Exception as e:
         # 降级：简单放大
         if is_black_swan:
@@ -1545,41 +1559,37 @@ elif page == "风险预测":
     if is_black_swan:
         st.subheader("AI 情景价格区间")
 
-        # 优先用 extreme_scenario 的匹配结果，否则降级到固定比例
+        # 情景图直接从 last_low/last_mid/last_high 推算
+        # 保证与上方 P10/P50/P90 数字完全一致，不再独立计算
         if scenarios_30d:
             vals   = list(scenarios_30d.values())
             labels = list(scenarios_30d.keys())
-            colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
-            scenarios = {
-                labels[0]: {"low": round(rt_price * (1 + vals[0] * 0.7), 1),
-                             "high": round(rt_price * (1 + vals[0] * 1.3), 1),
-                             "color": colors[0]},
-                labels[1]: {"low": round(rt_price * (1 + vals[1] * 0.8), 1),
-                             "high": round(rt_price * (1 + vals[1] * 1.2), 1),
-                             "color": colors[1]},
-                labels[2]: {"low": round(rt_price * (1 + vals[2] * 0.9), 1),
-                             "high": round(rt_price * (1 + vals[2] * 1.5), 1),
-                             "color": colors[2]},
-            }
         else:
-            # 降级：固定比例
-            scenarios = {
-                "缓解情景（外交解决）": {
-                    "low": round(rt_price * 0.88, 1),
-                    "high": round(rt_price * 0.98, 1),
-                    "color": "#2ecc71",
-                },
-                "基准情景（当前延续）": {
-                    "low": round(rt_price * 0.95, 1),
-                    "high": round(rt_price * 1.12, 1),
-                    "color": "#f1c40f",
-                },
-                "升级情景（冲突扩大）": {
-                    "low": round(rt_price * 1.10, 1),
-                    "high": round(rt_price * 1.28, 1),
-                    "color": "#e74c3c",
-                },
-            }
+            # 降级：从10日预测外推30日（简单线性缩放）
+            vals   = [last_low * 3, last_mid * 3, last_high * 3]
+            labels = ["缓解情景", "基准情景", "升级情景"]
+
+        colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
+        scenarios = {
+            labels[0]: {
+                "low" : round(rt_price * (1 + last_low), 1),    # 10日悲观价
+                "high": round(rt_price * (1 + vals[0] * 1.2), 1) if vals[0] > 0
+                        else round(rt_price * (1 + last_mid * 0.5), 1),
+                "color": colors[0],
+            },
+            labels[1]: {
+                "low" : round(rt_price * (1 + last_mid * 0.8), 1),
+                "high": round(rt_price * (1 + vals[1] * 1.2), 1) if len(vals) > 1
+                        else round(rt_price * (1 + last_high * 0.8), 1),
+                "color": colors[1],
+            },
+            labels[2]: {
+                "low" : round(rt_price * (1 + last_mid), 1),
+                "high": round(rt_price * (1 + vals[2] * 1.5), 1) if len(vals) > 2
+                        else round(rt_price * (1 + last_high * 1.5), 1),
+                "color": colors[2],
+            },
+        }
         fig_bs = go.Figure()
         fig_bs.add_hline(
             y=rt_price, line_dash="dash", line_color="white", line_width=2,
@@ -1729,6 +1739,7 @@ elif page == "风险预测":
                     is_black_swan      = is_black_swan,
                     bs_signals         = bs_signals if is_black_swan else None,
                     recent_news        = recent_news_list,
+                    extreme_result     = extreme_result,   # ← 新增
                 )
                 if result["status"] == "ok":
                     st.success(
