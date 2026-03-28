@@ -10,35 +10,46 @@ load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
 AV_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 
 def fetch_realtime_price(symbol, retries=3):
-    """抓取 Yahoo Finance 实时价格，带重试"""
+    """
+    抓取 Yahoo Finance 实时价格，带重试。
+    非交易时段返回最新可用价格，日期统一用今天，避免被 drop_duplicates 丢弃。
+    """
     url     = "https://query1.finance.yahoo.com/v8/finance/chart/" + symbol
     headers = {"User-Agent": "Mozilla/5.0"}
+
     for attempt in range(retries):
         try:
-            r     = requests.get(url, headers=headers, timeout=15)
-            data  = r.json()
-            meta  = data["chart"]["result"][0]["meta"]
-            price = meta["regularMarketPrice"]
-            ts    = meta["regularMarketTime"]
-            date  = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-            return date, price
+            r    = requests.get(url, headers=headers, timeout=15)
+            data = r.json()
+            meta = data["chart"]["result"][0]["meta"]
+
+            # 优先取实时价，非交易时段回退到上次收盘价
+            price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+            if not price:
+                raise ValueError("价格字段为空")
+
+            # 日期统一用今天，不用市场时间戳
+            # 原因：非交易时段时间戳是上次收盘日，写入会被 drop_duplicates 当重复数据丢弃
+            today = datetime.today().strftime("%Y-%m-%d")
+            return today, float(price)
+
         except Exception as e:
-            print("  第" + str(attempt+1) + "次失败: " + str(e)[:60])
+            print("  第" + str(attempt + 1) + "次失败: " + str(e)[:60])
             if attempt < retries - 1:
                 import time; time.sleep(3)
+
     return None, None
+
 
 def patch_oil_prices():
     today = datetime.today().strftime("%Y-%m-%d")
     print("正在更新油价数据（" + today + "）...")
 
-    # 读取现有完整历史数据
     oil_path = os.path.join(ROOT_DIR, "data", "raw", "oil_prices.csv")
     existing = pd.read_csv(oil_path, index_col=0, parse_dates=True)
     print("  现有数据：" + str(len(existing)) + " 条，截至 " +
           str(existing.dropna().index[-1].date()))
 
-    # 获取实时价格
     print("  获取 Yahoo Finance 实时价格...")
     wti_date,   wti_price   = fetch_realtime_price("CL=F")
     brent_date, brent_price = fetch_realtime_price("BZ=F")
@@ -63,9 +74,8 @@ def patch_oil_prices():
         print("  当前最新数据截至: " + str(existing.dropna().index[-1].date()))
         return existing
 
-    # 追加今日数据
-    ref_date = wti_date if wti_date else brent_date
-    today_df = pd.DataFrame(today_data, index=[pd.Timestamp(ref_date)])
+    # 写入今天的价格（即使是非交易日，也用今天日期写入，保证数据不断档）
+    today_df = pd.DataFrame(today_data, index=[pd.Timestamp(today)])
 
     combined = pd.concat([existing, today_df])
     combined = combined[~combined.index.duplicated(keep="last")]
@@ -76,6 +86,7 @@ def patch_oil_prices():
     print("  油价数据已更新至: " + str(combined.dropna().index[-1].date()))
     print("  共 " + str(len(combined)) + " 条记录")
     return combined
+
 
 if __name__ == "__main__":
     patch_oil_prices()
