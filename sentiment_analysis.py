@@ -143,17 +143,30 @@ def build_daily_sentiment_factor(df: pd.DataFrame = None):
             return 0.0
         return (g["score"] * g["confidence"]).sum() / total_conf
 
+    def sentiment_min(g):
+        """最强看跌信号（score最小值），捕捉被均值稀释的极端信号"""
+        bearish = g[g["sentiment"] == "bearish"]["score"]
+        return float(bearish.min()) if len(bearish) > 0 else 0.0
+
+    def high_conf_bearish_cnt(g):
+        """高置信度看跌新闻数量（score<-0.7 且 confidence>0.7）"""
+        mask = (g["score"] < -0.7) & (g["confidence"] > 0.7)
+        return int(mask.sum())
+
     daily = df.groupby("date").apply(
         lambda g: pd.Series({
-            "sentiment_score": weighted_score(g),
-            "news_count": len(g),
-            "bullish_count": (g["sentiment"] == "bullish").sum(),
-            "bearish_count": (g["sentiment"] == "bearish").sum(),
-            "neutral_count": (g["sentiment"] == "neutral").sum(),
-            "avg_confidence": g["confidence"].mean(),
-            "geopolitics_flag": int((g["event_type"] == "geopolitics").any()),
-            "policy_flag": int((g["event_type"] == "policy").any()),
-            "supply_flag": int((g["event_type"] == "supply").any()),
+            "sentiment_score"      : weighted_score(g),
+            "news_count"           : len(g),
+            "bullish_count"        : (g["sentiment"] == "bullish").sum(),
+            "bearish_count"        : (g["sentiment"] == "bearish").sum(),
+            "neutral_count"        : (g["sentiment"] == "neutral").sum(),
+            "avg_confidence"       : g["confidence"].mean(),
+            "geopolitics_flag"     : int((g["event_type"] == "geopolitics").any()),
+            "policy_flag"          : int((g["event_type"] == "policy").any()),
+            "supply_flag"          : int((g["event_type"] == "supply").any()),
+            # 峰值信号：捕捉被均值稀释的极端看跌信号
+            "sentiment_min"        : sentiment_min(g),
+            "high_conf_bearish_cnt": high_conf_bearish_cnt(g),
             "top_bullish": g[g["sentiment"] == "bullish"].sort_values(
                 "confidence", ascending=False
             )["title"].iloc[0] if (g["sentiment"] == "bullish").any() else "",
@@ -163,6 +176,10 @@ def build_daily_sentiment_factor(df: pd.DataFrame = None):
         }),
         include_groups=False
     ).reset_index()
+
+    # 情感加速度：当日情感分 - 前日情感分（速变=突发信号）
+    daily = daily.sort_values("date")
+    daily["sentiment_accel"] = daily["sentiment_score"].diff(1).fillna(0)
 
     daily.to_csv(FACTOR_PATH, index=False, encoding="utf-8-sig")
     print(f"  日频情绪因子已更新，共 {len(daily)} 天")

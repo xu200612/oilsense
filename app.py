@@ -713,6 +713,60 @@ with st.sidebar:
 # ── 黑天鹅预警横幅（全页面显示）─────────────────────────────────────────
 is_black_swan, bs_signals = get_black_swan_status()
 
+# ── 全局预测计算（所有页面共用，避免各页面数字不一致）────────────────────
+try:
+    _base_low  = pred_df["pred_enhanced_low"].iloc[-1]
+    _base_mid  = pred_df["pred_enhanced_mid"].iloc[-1]
+    _base_high = pred_df["pred_enhanced_high"].iloc[-1]
+    model_mode = "统计模型（Enhanced XGBoost）"
+except Exception:
+    _base_low, _base_mid, _base_high = -0.05, 0.01, 0.05
+    model_mode = "默认预测"
+
+last_low, last_mid, last_high = _base_low, _base_mid, _base_high
+extreme_active = False
+extreme_result = None
+similar_events = []
+scenarios_30d  = {}
+trigger_type   = "none"
+vol_ratio      = 1.0
+vix            = 20.0
+
+try:
+    from extreme_scenario import get_extreme_prediction
+    _feat_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
+    _latest    = pd.read_csv(_feat_path, index_col=0, parse_dates=True).iloc[-1]
+    vol_ratio  = float(_latest.get("vol_ratio", 1))
+    vix        = float(_latest.get("VIX", 20))
+
+    extreme_result = get_extreme_prediction(_latest, last_low, last_mid, last_high)
+
+    if extreme_result["activated"] or is_black_swan:
+        extreme_active = True
+        last_low       = extreme_result["pred_low"]
+        last_mid       = extreme_result["pred_mid"]
+        last_high      = extreme_result["pred_high"]
+        model_mode     = "极端情景匹配模式（第二层）"
+        similar_events = extreme_result.get("similar_events", [])
+        scenarios_30d  = extreme_result.get("scenarios_30d", {})
+        trigger_type   = extreme_result.get("trigger_type", "geopolitics")
+
+        # 霍尔木兹封锁强制修正方向
+        _hormuz_z = float(_latest.get("hormuz_tanker_zscore", 0))
+        _cp6      = float(_latest.get("cp6_tanker", 999))
+        if is_black_swan and (abs(_hormuz_z) > 1.5 or _cp6 < 5):
+            last_mid  = abs(last_mid)  if last_mid  < 0 else last_mid
+            last_high = abs(last_high) if last_high < 0 else last_high
+            scenarios_30d = {k: abs(v) if v < 0 else v for k, v in scenarios_30d.items()}
+except Exception:
+    if is_black_swan:
+        extreme_active = True
+        last_low   = last_low  * 2.5
+        last_high  = last_high * 3.0
+        model_mode = "极端事件放大模式（降级）"
+
+rt_price, rt_date, rt_live = get_realtime_price()
+
 if is_black_swan:
     triggers_text = " ｜ ".join(bs_signals.get("triggers", []))
     st.markdown(
@@ -1208,10 +1262,9 @@ elif page == "市场概览":
     st.title("市场概览")
     st.caption("基于最新数据的油市关键指标速览")
 
-    last_low = pred_df["pred_enhanced_low"].iloc[-1]
-    last_mid = pred_df["pred_enhanced_mid"].iloc[-1]
-    last_high = pred_df["pred_enhanced_high"].iloc[-1]
-    risk_label, risk_color, _ = get_risk_level(last_low, last_mid, last_high)
+    # last_low/last_mid/last_high 已在全局计算（含极端模型修正），直接使用
+    overview_low, overview_mid, overview_high = last_low, last_mid, last_high
+    risk_label, risk_color, _ = get_risk_level(overview_low, overview_mid, overview_high)
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -1229,9 +1282,9 @@ elif page == "市场概览":
             st.caption("🟡 缓存数据")
     with c2:
         st.metric("10日预测中位涨跌",
-                  str(round(last_mid * 100, 2)) + "%",
-                  "区间 [" + str(round(last_low * 100, 1)) + "%, " +
-                  str(round(last_high * 100, 1)) + "%]")
+                  str(round(overview_mid * 100, 2)) + "%",
+                  "区间 [" + str(round(overview_low * 100, 1)) + "%, " +
+                  str(round(overview_high * 100, 1)) + "%]")
     with c3:
         st.metric("当前风险等级", risk_label)
     with c4:
@@ -1445,67 +1498,7 @@ elif page == "风险预测":
     st.title("风险预测")
     st.caption("未来10日 WTI 原油价格涨跌幅预测")
 
-    rt_price, rt_date, rt_live = get_realtime_price()
-
-    # ── 第一层：统计模型预测 ──────────────────────────────────────────
-    try:
-        last_low   = pred_df["pred_enhanced_low"].iloc[-1]
-        last_mid   = pred_df["pred_enhanced_mid"].iloc[-1]
-        last_high  = pred_df["pred_enhanced_high"].iloc[-1]
-        model_mode = "统计模型（Enhanced XGBoost）"
-    except:
-        last_low, last_mid, last_high = -0.05, 0.01, 0.05
-        model_mode = "默认预测"
-
-    # ── 第二层：极端情景匹配（extreme_scenario.py）────────────────────
-    extreme_active = False
-    extreme_result = None
-    similar_events = []
-    scenarios_30d  = {}
-    trigger_type   = "none"
-    vol_ratio      = 1.0
-    vix            = 20.0
-
-    try:
-        from extreme_scenario import get_extreme_prediction
-        latest_feat_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
-        latest_feat      = pd.read_csv(latest_feat_path, index_col=0, parse_dates=True)
-        latest_row       = latest_feat.iloc[-1]
-        vol_ratio        = float(latest_row.get("vol_ratio", 1))
-        vix              = float(latest_row.get("VIX", 20))
-
-        extreme_result = get_extreme_prediction(latest_row, last_low, last_mid, last_high)
-
-        if extreme_result["activated"] or is_black_swan:
-            extreme_active = True
-            last_low       = extreme_result["pred_low"]
-            last_mid       = extreme_result["pred_mid"]
-            last_high      = extreme_result["pred_high"]
-            model_mode     = "极端情景匹配模式（第二层）"
-            similar_events = extreme_result.get("similar_events", [])
-            scenarios_30d  = extreme_result.get("scenarios_30d", {})
-            trigger_type   = extreme_result.get("trigger_type", "geopolitics")
-
-            # 霍尔木兹封锁时供应中断必然推升油价，强制修正方向
-            # 若匹配到的历史事件恰好是下跌的（如以哈冲突短期回落），取绝对值
-            hormuz_z = float(latest_row.get("hormuz_tanker_zscore", 0))
-            cp6      = float(latest_row.get("cp6_tanker", 999))
-            if is_black_swan and (abs(hormuz_z) > 1.5 or cp6 < 5):
-                # 霍尔木兹封锁：强制为正方向，幅度参考历史类比
-                last_mid  = abs(last_mid)  if last_mid  < 0 else last_mid
-                last_high = abs(last_high) if last_high < 0 else last_high
-                # 情景30日也修正方向
-                scenarios_30d = {
-                    k: abs(v) if v < 0 else v
-                    for k, v in scenarios_30d.items()
-                }
-    except Exception as e:
-        # 降级：简单放大
-        if is_black_swan:
-            extreme_active = True
-            last_low       = last_low  * 2.5
-            last_high      = last_high * 3.0
-            model_mode     = "极端事件放大模式（降级）"
+    # last_low/last_mid/last_high/extreme_active 等已在全局计算完毕，直接使用
 
     risk_label, risk_color, _ = get_risk_level(last_low, last_mid, last_high)
 
@@ -1739,7 +1732,7 @@ elif page == "风险预测":
                     is_black_swan      = is_black_swan,
                     bs_signals         = bs_signals if is_black_swan else None,
                     recent_news        = recent_news_list,
-                    extreme_result     = extreme_result,   # ← 新增
+                    similar_events     = similar_events if extreme_active else [],
                 )
                 if result["status"] == "ok":
                     st.success(

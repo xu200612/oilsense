@@ -1,10 +1,10 @@
-﻿date,sentiment_score,news_count,bullish_count,bearish_count,neutral_count,avg_confidence,geopolitics_flag,policy_flag,supply_flag,top_bullish,top_bearish
-2026-03-20,0.571304347826087,8,6,0,2,0.71875,1,0,0,Oil Surges as Iran War Escalates,
-2026-03-21,0.515,6,5,0,1,0.6666666666666666,1,1,0,How the Middle East crisis is rewriting energy security doctrine,
-2026-03-22,0.11999999999999998,6,3,3,0,0.6666666666666666,1,0,1,'A direct hit' - BBC visits Israeli town after Iranian strike,"Crude oil export earnings dropped by $5.31bn, says report"
-2026-03-23,0.22555720653789002,104,51,23,30,0.6471153846153845,1,1,1,"World Oil Prices Surge to Near $113 as US-Iran Conflict Disrupts Strait of Hormuz Flows on March 23, 2026",Oil tumbles nearly 11% after Trump puts hold on U.S. strikes against Iran energy infrastructure for five days
-2026-03-24,0.3047457627118644,104,62,8,34,0.5673076923076923,1,1,1,Iran launches waves of missiles towards Israel,Japan Moves to Release Oil Stockpiles as Energy Crisis Deepens
-2026-03-25,0.09232927970065483,228,92,61,75,0.7032894736842104,1,1,1,QatarEnergy faces $20 billion loss after Iranian missile strikes disrupt global LNG supply,Oil falls more than 4% and Asian shares gain over Trump's talk of negotiations with Iran
-2026-03-26,0.25801033591731265,56,31,10,15,0.6910714285714287,1,1,1,Middle East crude oil tanker rates reached a multi-decade high in March,Trump administration waives gasoline regulations to address surging fuel prices
-2026-03-27,0.22791293213828423,114,66,20,28,0.6850877192982455,1,1,1,Oil Jumps as War Risks Intensify,USA Crude Oil Stocks Rise by Almost 7MM Barrels WoW
-2026-03-28,0.6533333333333333,2,2,0,0,0.75,1,0,0,Iran war live: Trump again slams NATO’s lack of support for war on Tehran,
+﻿date,sentiment_score,news_count,bullish_count,bearish_count,neutral_count,avg_confidence,geopolitics_flag,policy_flag,supply_flag,sentiment_min,high_conf_bearish_cnt,top_bullish,top_bearish,sentiment_accel
+2026-03-20,0.571304347826087,8,6,0,2,0.71875,1,0,0,0.0,0,Oil Surges as Iran War Escalates,,0.0
+2026-03-21,0.515,6,5,0,1,0.6666666666666666,1,1,0,0.0,0,"Cabinet Secretaries Rule Out Export Restrictions to Curb Gas Prices, Citing Energy Security",,-0.05630434782608695
+2026-03-22,0.12,6,3,3,0,0.6666666666666666,1,0,1,-0.4,0,'A direct hit' - BBC visits Israeli town after Iranian strike,"Crude oil export earnings dropped by $5.31bn, says report",-0.395
+2026-03-23,0.2255572065378901,104,51,23,30,0.6471153846153844,1,1,1,-0.7,0,"World Oil Prices Surge to Near $113 as US-Iran Conflict Disrupts Strait of Hormuz Flows on March 23, 2026",Oil tumbles nearly 11% after Trump puts hold on U.S. strikes against Iran energy infrastructure for five days,0.10555720653789011
+2026-03-24,0.2522554188635032,144,78,13,53,0.5927083333333333,1,1,1,-0.6,0,Iran launches waves of missiles towards Israel,"US Crude Oil, Product Inventories Rise",0.02669821232561312
+2026-03-25,0.08819688598694123,282,114,77,91,0.7060283687943263,1,1,1,-0.7,0,QatarEnergy faces $20 billion loss after Iranian missile strikes disrupt global LNG supply,"BPCL, HPCL, IOC, IndiGo & paint stocks gain as crude prices slide below $100 per barrel",-0.164058532876562
+2026-03-26,0.26451204055766786,57,32,10,15,0.6921052631578948,1,1,1,-0.4,0,The Iran War Has Already Unleashed a $25 Billion Energy Repair Bill,Record Oil and Gas Output Fails to Shield CNOOC from Market Volatility,0.17631515457072663
+2026-03-27,0.2279129321382843,114,66,20,28,0.6850877192982454,1,1,1,-0.7,0,Oil Jumps as War Risks Intensify,USA Crude Oil Stocks Rise by Almost 7MM Barrels WoW,-0.03659910841938355
+2026-03-28,0.46818181818181814,7,5,0,2,0.6285714285714284,1,0,0,0.0,0,Iran war live: Trump again slams NATO’s lack of support for war on Tehran,,0.24026888604353383

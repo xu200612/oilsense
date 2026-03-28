@@ -86,33 +86,21 @@ def _build_normal_context(
     if recent_news:
         news_text = "\n近期关键市场新闻（最新6条）：\n"
         for n in recent_news[:6]:
-            news_text += "- {}: {}\n".format(
-                str(n.get("date", ""))[:10], n.get("title", ""))
+            # 用拼接替代format，避免标题里的{}被误解析
+            title = str(n.get("title", "")).replace("{", "{{").replace("}", "}}")
+            news_text += "- " + str(n.get("date", ""))[:10] + ": " + title + "\n"
 
-    return """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【当前市场状态】正常市场（统计模型有效）
-报告日期：{}
-WTI现价：{:.2f}美元/桶
-
-【模型预测（未来10日涨跌幅）】
-{}
-
-【主要驱动因子（XGBoost Top5）】
-{}
-
-【宏观指标】
-{}
-
-【关键咽喉点航运状态】
-{}
-{}━━━━━━━━━━━━━━━━━━━━━━━""".format(
-        datetime.now().strftime("%Y年%m月%d日"),
-        current_price,
-        pred_text,
-        factors_text,
-        macro_context,
-        cp_context,
-        news_text,
+    return (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "【当前市场状态】正常市场（统计模型有效）\n"
+        "报告日期：" + datetime.now().strftime("%Y年%m月%d日") + "\n"
+        "WTI现价：" + str(round(current_price, 2)) + "美元/桶\n\n"
+        "【模型预测（未来10日涨跌幅）】\n" + pred_text + "\n\n"
+        "【主要驱动因子（XGBoost Top5）】\n" + factors_text + "\n\n"
+        "【宏观指标】\n" + macro_context + "\n\n"
+        "【关键咽喉点航运状态】\n" + cp_context + "\n"
+        + news_text +
+        "━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 
@@ -218,12 +206,11 @@ def generate_report(
     is_black_swan     : bool = False,
     bs_signals        : dict = None,
     recent_news       : list = None,
+    similar_events    : list = None,
 ) -> dict:
-    """
-    统一报告生成入口
-    正常市场 → 标准版风险报告
-    黑天鹅期间 → 极端事件深度分析报告
-    """
+    # 强制重新加载 .env，避免Streamlit缓存旧Key
+    load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"), override=True)
+
     try:
         from openai import OpenAI
     except ImportError:
@@ -235,8 +222,27 @@ def generate_report(
 
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
+    # 构建历史情景匹配附加上下文
+    similar_events_text = ""
+    if similar_events:
+        similar_events_text = "\n\n【AI历史情景匹配结果（余弦相似度）】\n"
+        for ev in similar_events[:3]:
+            ret_10d = "{:+.1%}".format(ev["actual_return"]) if ev.get("actual_return") is not None else "N/A"
+            ret_30d = "{:+.1%}".format(ev["return_30d"]) if ev.get("return_30d") is not None else "N/A"
+            # 用字符串拼接替代.format()，避免description里的{}被误解析
+            similar_events_text += (
+                "- " + str(ev.get("event", "")) +
+                "（相似度" + str(round(ev.get("similarity", 0) * 100)) + "%，严重程度：" +
+                str(ev.get("severity", "")) + "）\n" +
+                "  触发日：" + str(ev.get("trigger_date", "")) +
+                "  10日实际涨跌：" + ret_10d +
+                "  30日实际涨跌：" + ret_30d + "\n" +
+                "  描述：" + str(ev.get("description", "")) + "\n"
+            )
+
     if is_black_swan and bs_signals:
         context   = _build_blackswan_context(bs_signals, recent_news)
+        context  += similar_events_text
         prompt    = _get_blackswan_prompt(context)
         mode      = "黑天鹅极端事件分析"
         max_tokens= 2500
@@ -250,6 +256,7 @@ def generate_report(
             current_price, pred_low, pred_mid, pred_high,
             feature_importance, recent_news
         )
+        context  += similar_events_text   # 正常报告也注入情景匹配数据
         prompt    = _get_normal_prompt(context)
         mode      = "标准市场风险报告"
         max_tokens= 1800
@@ -257,11 +264,6 @@ def generate_report(
             "你是花旗银行企业银行部大宗商品风险分析师，为航空、化工、能源贸易商等企业客户提供油价风险报告。"
             "报告需基于模型数据输出具体价格数字，因子分析需量化，行业建议需可执行。"
             "格式严格按照提示词的表格和章节结构输出，不得省略任何章节。"
-        )
-        sys_msg   = (
-            "你是花旗银行企业银行部大宗商品风险分析师，"
-            "为企业客户提供专业的油价风险分析报告。"
-            "语言简洁专业，数字具体，建议可执行。"
         )
 
     try:

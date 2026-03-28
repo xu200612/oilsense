@@ -15,17 +15,14 @@ def detect_black_swan():
     triggers = []
 
     pw_path = os.path.join(ROOT_DIR, "data", "raw", "portwatch_chokepoints.csv")
-
-    # ── 只读一次 PortWatch 文件，复用 df ──────────────────────────────────
-    df_pw = None
     if os.path.exists(pw_path):
-        df_pw = pd.read_csv(pw_path, index_col=0, parse_dates=True)
+        df = pd.read_csv(pw_path, index_col=0, parse_dates=True)
 
-        if "hormuz_blocked" in df_pw.columns:
-            cp6          = df_pw["cp6_tanker"].dropna()
+        if "hormuz_blocked" in df.columns:
+            cp6          = df["cp6_tanker"].dropna()
             latest       = int(cp6.iloc[-1])
             avg_90d      = round(float(cp6.tail(90).mean()), 1)
-            latest_flag  = int(df_pw["hormuz_blocked"].dropna().iloc[-1])
+            latest_flag  = int(df["hormuz_blocked"].dropna().iloc[-1])
             signals["hormuz_blocked"]       = latest_flag
             signals["hormuz_tanker_latest"] = latest
             signals["hormuz_tanker_avg90d"] = avg_90d
@@ -36,11 +33,11 @@ def detect_black_swan():
                     "（当前{}艘/日均{}艘）".format(latest, avg_90d)
                 )
 
-        if "mandeb_blocked" in df_pw.columns:
-            cp4         = df_pw["cp4_tanker"].dropna()
+        if "mandeb_blocked" in df.columns:
+            cp4         = df["cp4_tanker"].dropna()
             m_latest    = int(cp4.iloc[-1])
             m_avg       = round(float(cp4.tail(90).mean()), 1)
-            m_flag      = int(df_pw["mandeb_blocked"].dropna().iloc[-1])
+            m_flag      = int(df["mandeb_blocked"].dropna().iloc[-1])
             signals["mandeb_blocked"]       = m_flag
             signals["mandeb_tanker_latest"] = m_latest
             signals["mandeb_tanker_avg90d"] = m_avg
@@ -50,8 +47,8 @@ def detect_black_swan():
                     "（当前{}艘/日均{}艘）".format(m_latest, m_avg)
                 )
 
-        if "cp11_tanker" in df_pw.columns:
-            cp11 = df_pw["cp11_tanker"].dropna()
+        if "cp11_tanker" in df.columns:
+            cp11 = df["cp11_tanker"].dropna()
             if len(cp11) > 90:
                 z = float((cp11.iloc[-1] - cp11.tail(90).mean()) /
                           (cp11.tail(90).std() + 1e-6))
@@ -67,8 +64,8 @@ def detect_black_swan():
         if "VIX" in macro.columns:
             vix = float(macro["VIX"].dropna().iloc[-1])
             signals["VIX"] = round(vix, 2)
-            if vix > 45:
-                triggers.append("VIX极端恐慌（当前{:.1f} > 45）".format(vix))
+            if vix > 28:   # 原45，俄乌冲突峰值仅36，45过严
+                triggers.append("VIX恐慌上升（当前{:.1f} > 28）".format(vix))
 
     gdelt_path = os.path.join(ROOT_DIR, "data", "raw", "gdelt_sentiment.csv")
     if os.path.exists(gdelt_path):
@@ -76,28 +73,30 @@ def detect_black_swan():
         if "gdelt_conflict_intensity" in gdelt.columns:
             ci        = gdelt["gdelt_conflict_intensity"].dropna()
             ci_latest = float(ci.iloc[-1])
-            ci_p95    = float(ci.quantile(0.95))
+            ci_p80    = float(ci.quantile(0.80))   # 原p95过严，改p80
             signals["gdelt_conflict_intensity"] = round(ci_latest, 4)
-            signals["gdelt_conflict_p95"]       = round(ci_p95, 4)
-            if ci_latest > ci_p95:
+            signals["gdelt_conflict_p80"]       = round(ci_p80, 4)
+            if ci_latest > ci_p80:
                 triggers.append(
-                    "GDELT冲突强度超过历史95分位"
-                    "（当前{:.4f} > p95={:.4f}）".format(ci_latest, ci_p95)
+                    "GDELT冲突强度超过历史80分位"
+                    "（当前{:.4f} > p80={:.4f}）".format(ci_latest, ci_p80)
                 )
 
-    # ── 退出条件：油轮数量连续3天回升超过均值60%（高于触发阈值50%，避免死区）──
+    # ── 退出条件：油轮数量连续3天回升超过均值60%（触发阈值50%，避免死区）──
     exit_signals = []
-    if df_pw is not None and "cp6_tanker" in df_pw.columns:
-        cp6_exit  = df_pw["cp6_tanker"].dropna()
-        avg_exit  = float(cp6_exit.tail(90).mean())
-        recent_3d = cp6_exit.iloc[-3:]
-        if len(recent_3d) == 3 and all(recent_3d > avg_exit * 0.6):
-            exit_signals.append(
-                "霍尔木兹油轮通过量已连续3日回升至均值60%以上"
-                "（最近3日：{}艘，90日均值：{:.1f}艘）".format(
-                    list(recent_3d.astype(int)), avg_exit
+    if os.path.exists(pw_path):
+        df_exit = pd.read_csv(pw_path, index_col=0, parse_dates=True)
+        if "cp6_tanker" in df_exit.columns:
+            cp6_exit  = df_exit["cp6_tanker"].dropna()
+            avg_exit  = float(cp6_exit.tail(90).mean())
+            recent_3d = cp6_exit.iloc[-3:]
+            if len(recent_3d) == 3 and all(recent_3d > avg_exit * 0.6):
+                exit_signals.append(
+                    "霍尔木兹油轮通过量已连续3日回升至均值60%以上"
+                    "（最近3日：{}艘，90日均值：{:.1f}艘）".format(
+                        list(recent_3d.astype(int)), avg_exit
+                    )
                 )
-            )
 
     signals["exit_signals"]  = exit_signals
     signals["auto_exit"]     = len(exit_signals) > 0
@@ -111,70 +110,51 @@ def detect_black_swan():
 
 # ── 构建丰富上下文 ────────────────────────────────────────────────────────
 def _build_context(signals: dict, recent_news: list = None) -> str:
-    pw_path    = os.path.join(ROOT_DIR, "data", "raw", "portwatch_chokepoints.csv")
-    oil_path   = os.path.join(ROOT_DIR, "data", "raw", "oil_prices.csv")
-    macro_path = os.path.join(ROOT_DIR, "data", "raw", "macro_data.csv")
+    pw_path   = os.path.join(ROOT_DIR, "data", "raw", "portwatch_chokepoints.csv")
+    oil_path  = os.path.join(ROOT_DIR, "data", "raw", "oil_prices.csv")
+    macro_path= os.path.join(ROOT_DIR, "data", "raw", "macro_data.csv")
 
-    # 封锁持续天数及起始日期
+    # 封锁持续天数
     blockade_days      = 0
-    blockade_start_str = "未知"   # ← 动态起始日，不硬编码
-    hormuz_history     = ""
-    cape_text          = ""
-    mandeb_text        = ""
-
+    blockade_start_str = "未知"
+    hormuz_history = ""
+    cape_text      = ""
+    mandeb_text    = ""
     if os.path.exists(pw_path):
         df_pw = pd.read_csv(pw_path, index_col=0, parse_dates=True)
-
         if "hormuz_blocked" in df_pw.columns:
             blocked = df_pw["hormuz_blocked"].dropna()
-
-            # 计算封锁起始日（作用域明确，不依赖 dir()）
-            blockade_start = None
             if int(blocked.iloc[-1]) == 1:
+                # 找到最近一次连续封锁的起始日（从后往前找第一个0之后的1）
                 unblocked_idx = blocked[blocked == 0].index
                 if len(unblocked_idx) > 0:
-                    last_normal   = unblocked_idx[-1]
-                    candidates    = blocked[(blocked.index > last_normal) & (blocked == 1)]
-                    blockade_start = candidates.index[0] if len(candidates) > 0 else None
+                    last_normal = unblocked_idx[-1]
+                    start_date = blocked[blocked.index > last_normal][blocked == 1].index[0]
                 else:
-                    candidates    = blocked[blocked == 1]
-                    blockade_start = candidates.index[0] if len(candidates) > 0 else None
-
-                if blockade_start is not None:
-                    blockade_days      = (blocked.index[-1] - blockade_start).days + 1
-                    blockade_start_str = blockade_start.strftime("%Y年%m月%d日")
-
+                    start_date = blocked[blocked == 1].index[0]
+                blockade_days      = (blocked.index[-1] - start_date).days + 1
+                blockade_start_str = start_date.strftime("%Y年%m月%d日")
             cp6 = df_pw["cp6_tanker"].dropna()
-
-            # 用明确的 blockade_start 决定封锁前基准窗口
-            if blockade_start is not None:
-                _ref = blockade_start
-            else:
-                _ref = cp6.index[-30] if len(cp6) > 30 else cp6.index[0]
-
-            pre_slice = cp6[cp6.index < _ref]
-            pre_mean  = float(pre_slice.tail(30).mean()) if len(pre_slice) >= 5 else float(cp6.head(30).mean())
-            post_slice = cp6[cp6.index >= _ref]
-            post_mean = float(post_slice.mean()) if len(post_slice) > 0 else float(cp6.iloc[-1])
+            # 动态封锁起始日，不硬编码
+            _blockade_start = start_date if int(blocked.iloc[-1]) == 1 and "start_date" in dir() else cp6.index[-30]
+            pre_mean  = float(cp6[cp6.index < _blockade_start].tail(30).mean()) if len(cp6[cp6.index < _blockade_start]) >= 5 else float(cp6.head(30).mean())
+            post_mean = float(cp6[cp6.index >= _blockade_start].mean()) if len(cp6[cp6.index >= _blockade_start]) > 0 else float(cp6.iloc[-1])
             drop_pct  = (1 - post_mean / pre_mean) * 100 if pre_mean > 0 else 0
-
             hormuz_history = (
                 "封锁前30日均值：{:.1f}艘/日，"
                 "封锁后均值：{:.1f}艘/日，降幅：{:.1f}%".format(
                     pre_mean, post_mean, drop_pct)
             )
-
         if "cape_reroute_signal" in df_pw.columns:
             cape_val  = float(df_pw["cape_reroute_signal"].dropna().iloc[-1])
             cape_text = "好望角绕行信号：{:.2f}（>1.0表示绕行流量高于正常水平）".format(cape_val)
-
         if "cp4_tanker" in df_pw.columns:
-            cp4         = df_pw["cp4_tanker"].dropna()
-            m_latest    = int(cp4.iloc[-1])
-            m_avg       = float(cp4.tail(90).mean())
-            mandeb_text = "曼德海峡：当前{}艘/日，均值{:.1f}艘/日".format(m_latest, m_avg)
+            cp4        = df_pw["cp4_tanker"].dropna()
+            m_latest   = int(cp4.iloc[-1])
+            m_avg      = float(cp4.tail(90).mean())
+            mandeb_text= "曼德海峡：当前{}艘/日，均值{:.1f}艘/日".format(m_latest, m_avg)
 
-    # 油价走势（复用已计算的 blockade_start，不再重复读文件）
+    # 油价走势
     oil_context = ""
     if os.path.exists(oil_path):
         df_oil = pd.read_csv(oil_path, index_col=0, parse_dates=True)
@@ -183,19 +163,26 @@ def _build_context(signals: dict, recent_news: list = None) -> str:
             latest = float(wti.iloc[-1])
             w1ago  = float(wti.iloc[-6])  if len(wti) > 6  else latest
             m1ago  = float(wti.iloc[-22]) if len(wti) > 22 else latest
-
-            # 用上方已解析的 blockade_start 找封锁前基准价
-            try:
-                _pre_wti = wti[wti.index < blockade_start] if blockade_start is not None else pd.Series(dtype=float)
-                if len(_pre_wti) > 0:
-                    pre_b     = float(_pre_wti.iloc[-1])
-                    pre_label = blockade_start.strftime("%m月%d日") + "封锁前"
-                else:
-                    raise ValueError("no pre-blockade data")
-            except Exception:
-                pre_b     = float(wti.iloc[-30]) if len(wti) > 30 else latest
+            # 动态找封锁前基准价，不硬编码日期
+            _pw_path = os.path.join(ROOT_DIR, "data", "raw", "portwatch_chokepoints.csv")
+            _blockade_dt = None
+            if os.path.exists(_pw_path):
+                _df_pw2 = pd.read_csv(_pw_path, index_col=0, parse_dates=True)
+                if "hormuz_blocked" in _df_pw2.columns:
+                    _bl = _df_pw2["hormuz_blocked"].dropna()
+                    if len(_bl) > 0 and int(_bl.iloc[-1]) == 1:
+                        _unbl = _bl[_bl == 0]
+                        if len(_unbl) > 0:
+                            _blockade_dt = _bl[_bl.index > _unbl.index[-1]].index[0]
+                        else:
+                            _blockade_dt = _bl[_bl == 1].index[0]
+            if _blockade_dt is not None:
+                _pre_wti = wti[wti.index < _blockade_dt]
+                pre_b = float(_pre_wti.iloc[-1]) if len(_pre_wti) > 0 else latest
+                pre_label = _blockade_dt.strftime("%m月%d日") + "封锁前"
+            else:
+                pre_b = float(wti.iloc[-30]) if len(wti) > 30 else latest
                 pre_label = "30日前"
-
             oil_context = (
                 "WTI最新价：{:.2f}美元/桶\n"
                 "基准价格（{}）：{:.2f}美元/桶\n"
@@ -223,42 +210,27 @@ def _build_context(signals: dict, recent_news: list = None) -> str:
     if recent_news:
         news_text = "\n近期关键新闻（最新8条）：\n"
         for n in recent_news[:8]:
-            news_text += "- {}: {}\n".format(
-                str(n.get("date", ""))[:10], n.get("title", ""))
+            news_text += "- " + str(n.get("date", ""))[:10] + ": " + str(n.get("title", "")) + "\n"
 
     triggers_text = "\n".join(["- " + t for t in signals.get("triggers", [])])
 
-    context = """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【触发信号】
-{triggers}
-
-【霍尔木兹封锁详情】
-- 封锁持续时间：约{days}天（自{start}起）
-- {hormuz}
-- {cape}
-- {mandeb}
-
-【油价走势】
-{oil}
-
-【宏观环境】
-{macro}
-
-【历史类比案例】
-- 1990年海湾战争：油价从$17涨至$46（+170%），持续约6个月
-- 2019年沙特阿美袭击：油价单日暴涨15%，2周内回落50%
-- 2022年俄乌冲突：油价从$90涨至$130（+44%），持续约3个月
-- 当前霍尔木兹封锁：全球约20%石油供应受阻，规模历史罕见
-{news}━━━━━━━━━━━━━━━━━━━━━━━""".format(
-        triggers=triggers_text,
-        days=blockade_days,
-        start=blockade_start_str,
-        hormuz=hormuz_history,
-        cape=cape_text,
-        mandeb=mandeb_text,
-        oil=oil_context,
-        macro=macro_context,
-        news=news_text,
+    context = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "【触发信号】\n" + triggers_text + "\n\n"
+        "【霍尔木兹封锁详情】\n"
+        "- 封锁持续时间：约" + str(blockade_days) + "天（自" + blockade_start_str + "起）\n"
+        "- " + hormuz_history + "\n"
+        "- " + cape_text + "\n"
+        "- " + mandeb_text + "\n\n"
+        "【油价走势】\n" + oil_context + "\n\n"
+        "【宏观环境】\n" + macro_context + "\n\n"
+        "【历史类比案例】\n"
+        "- 1990年海湾战争：油价从$17涨至$46（+170%），持续约6个月\n"
+        "- 2019年沙特阿美袭击：油价单日暴涨15%，2周内回落50%\n"
+        "- 2022年俄乌冲突：油价从$90涨至$130（+44%），持续约3个月\n"
+        "- 当前霍尔木兹封锁：全球约20%石油供应受阻，规模历史罕见\n"
+        + news_text +
+        "━━━━━━━━━━━━━━━━━━━━━━━"
     )
     return context
 
