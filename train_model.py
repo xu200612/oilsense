@@ -164,8 +164,6 @@ def build_features(df, target_col="WTI", horizon=10):
         "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
         "mandeb_tanker_ma7", "mandeb_blocked",
         "cape_reroute_signal",
-        # 宏观补充
-        "US_PPI",
     ]
 
     # Baseline 特征集（仅传统量化因子）
