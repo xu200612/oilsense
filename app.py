@@ -403,22 +403,20 @@ def get_country_risk():
 
 
 @st.cache_data(ttl=86400)
-@st.cache_data(ttl=86400)
 def auto_update_data():
     try:
         from update_daily import (
             update_oil_prices,
             update_macro_data,
-            update_news_rss,
-            update_feature_matrix,    # ← 新增
+            update_news_rss,      # RSS很快
         )
-        update_oil_prices()
-        update_macro_data()
-        update_news_rss()
-        update_feature_matrix()       # ← 新增
+        update_oil_prices()       # FRED拉增量，通常0条，很快
+        update_macro_data()       # 同上
+        update_news_rss()         # RSS抓取，约10秒
         return datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception as e:
         return f"更新失败: {e}"
+
 with st.spinner("正在检查数据更新..."):
     auto_update_data()
 
@@ -570,8 +568,9 @@ def get_chokepoint_status():
         }
     return status
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300)  # 每5分钟刷新一次
 def get_realtime_price():
+    """从 Yahoo Finance 拉取实时 WTI 价格"""
     try:
         import requests
         url     = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F"
@@ -579,13 +578,16 @@ def get_realtime_price():
         r       = requests.get(url, headers=headers, timeout=10)
         data    = r.json()
         meta    = data["chart"]["result"][0]["meta"]
-        price   = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")  # ← 修改
-        date    = datetime.today().strftime("%Y-%m-%d")   # ← 改为今天，不用时间戳
+        price   = meta["regularMarketPrice"]
+        ts      = meta["regularMarketTime"]
+        date    = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
         return price, date, True
     except Exception as e:
+        # 失败则回退到 feature_matrix 里的最新价格
         fallback_price = feat["WTI"].iloc[-1]
         fallback_date  = str(feat.index[-1].date())
         return fallback_price, fallback_date, False
+
 feat, model_feature_map, models, importance, sentiment, news = load_assets()
 
 
@@ -1455,26 +1457,41 @@ elif page == "风险预测":
         last_low, last_mid, last_high = -0.05, 0.01, 0.05
         model_mode = "默认预测"
 
-    # ── 第二层：极端事件放大 ──────────────────────────────────────────
+    # ── 第二层：极端情景匹配（extreme_scenario.py）────────────────────
     extreme_active = False
+    extreme_result = None
+    similar_events = []
+    scenarios_30d  = {}
+    trigger_type   = "none"
+    vol_ratio      = 1.0
+    vix            = 20.0
+
     try:
+        from extreme_scenario import get_extreme_prediction
         latest_feat_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
         latest_feat      = pd.read_csv(latest_feat_path, index_col=0, parse_dates=True)
         latest_row       = latest_feat.iloc[-1]
         vol_ratio        = float(latest_row.get("vol_ratio", 1))
         vix              = float(latest_row.get("VIX", 20))
-        if vol_ratio > 1.5 or vix > 28:
+
+        extreme_result = get_extreme_prediction(latest_row, last_low, last_mid, last_high)
+
+        if extreme_result["activated"] or is_black_swan:
             extreme_active = True
-    except:
-        pass
-
-    if is_black_swan:
-        extreme_active = True
-
-    if extreme_active:
-        last_low   = last_low  * 2.5
-        last_high  = last_high * 3.0
-        model_mode = "极端事件放大模式"
+            last_low       = extreme_result["pred_low"]
+            last_mid       = extreme_result["pred_mid"]
+            last_high      = extreme_result["pred_high"]
+            model_mode     = "极端情景匹配模式（第二层）"
+            similar_events = extreme_result.get("similar_events", [])
+            scenarios_30d  = extreme_result.get("scenarios_30d", {})
+            trigger_type   = extreme_result.get("trigger_type", "geopolitics")
+    except Exception as e:
+        # 降级：简单放大
+        if is_black_swan:
+            extreme_active = True
+            last_low       = last_low  * 2.5
+            last_high      = last_high * 3.0
+            model_mode     = "极端事件放大模式（降级）"
 
     risk_label, risk_color, _ = get_risk_level(last_low, last_mid, last_high)
 
@@ -1527,23 +1544,42 @@ elif page == "风险预测":
     # ── 黑天鹅：AI情景分析图 ─────────────────────────────────────────
     if is_black_swan:
         st.subheader("AI 情景价格区间")
-        scenarios = {
-            "缓解情景（外交解决）": {
-                "low"  : round(rt_price * 0.88, 1),
-                "high" : round(rt_price * 0.98, 1),
-                "color": "#2ecc71",
-            },
-            "基准情景（当前延续）": {
-                "low"  : round(rt_price * 0.95, 1),
-                "high" : round(rt_price * 1.12, 1),
-                "color": "#f1c40f",
-            },
-            "升级情景（冲突扩大）": {
-                "low"  : round(rt_price * 1.10, 1),
-                "high" : round(rt_price * 1.28, 1),
-                "color": "#e74c3c",
-            },
-        }
+
+        # 优先用 extreme_scenario 的匹配结果，否则降级到固定比例
+        if scenarios_30d:
+            vals   = list(scenarios_30d.values())
+            labels = list(scenarios_30d.keys())
+            colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
+            scenarios = {
+                labels[0]: {"low": round(rt_price * (1 + vals[0] * 0.7), 1),
+                             "high": round(rt_price * (1 + vals[0] * 1.3), 1),
+                             "color": colors[0]},
+                labels[1]: {"low": round(rt_price * (1 + vals[1] * 0.8), 1),
+                             "high": round(rt_price * (1 + vals[1] * 1.2), 1),
+                             "color": colors[1]},
+                labels[2]: {"low": round(rt_price * (1 + vals[2] * 0.9), 1),
+                             "high": round(rt_price * (1 + vals[2] * 1.5), 1),
+                             "color": colors[2]},
+            }
+        else:
+            # 降级：固定比例
+            scenarios = {
+                "缓解情景（外交解决）": {
+                    "low": round(rt_price * 0.88, 1),
+                    "high": round(rt_price * 0.98, 1),
+                    "color": "#2ecc71",
+                },
+                "基准情景（当前延续）": {
+                    "low": round(rt_price * 0.95, 1),
+                    "high": round(rt_price * 1.12, 1),
+                    "color": "#f1c40f",
+                },
+                "升级情景（冲突扩大）": {
+                    "low": round(rt_price * 1.10, 1),
+                    "high": round(rt_price * 1.28, 1),
+                    "color": "#e74c3c",
+                },
+            }
         fig_bs = go.Figure()
         fig_bs.add_hline(
             y=rt_price, line_dash="dash", line_color="white", line_width=2,
@@ -1568,6 +1604,54 @@ elif page == "风险预测":
             title="未来1-2周 WTI 价格情景区间",
         )
         st.plotly_chart(fig_bs, use_container_width=True, key="chart_bs")
+
+        # ── 最相似历史事件 ────────────────────────────────────────────
+        if similar_events:
+            st.subheader("历史情景匹配")
+            st.caption("基于波动率、VIX、航运数据、地缘情感的加权余弦相似度匹配")
+            SEVERITY_COLOR = {
+                "extreme" : "#e74c3c",
+                "severe"  : "#e67e22",
+                "moderate": "#f1c40f",
+            }
+            SEVERITY_LABEL = {
+                "extreme" : "极端",
+                "severe"  : "严重",
+                "moderate": "中等",
+            }
+            TRIGGER_LABEL = {
+                "geopolitics"    : "地缘政治",
+                "macro"          : "宏观冲击",
+                "supply_policy"  : "供应政策",
+                "demand_recovery": "需求恢复",
+            }
+            for ev in similar_events:
+                sev_color = SEVERITY_COLOR.get(ev.get("severity", "moderate"), "#f1c40f")
+                sev_label = SEVERITY_LABEL.get(ev.get("severity", "moderate"), "中等")
+                tri_label = TRIGGER_LABEL.get(ev.get("trigger", ""), ev.get("trigger", ""))
+                ret_10d   = ev.get("actual_return")
+                ret_30d   = ev.get("return_30d") or ev.get("typical_30d")
+                ret_10d_str = f"{ret_10d*100:+.1f}%" if ret_10d is not None else "N/A"
+                ret_30d_str = f"{ret_30d*100:+.1f}%" if ret_30d is not None else "N/A"
+                sim_pct     = int(ev.get("similarity", 0) * 100)
+
+                st.markdown(
+                    f"<div style='background:rgba(255,255,255,0.04);border-left:3px solid {sev_color};"
+                    f"border-radius:0 8px 8px 0;padding:12px 14px;margin-bottom:8px;'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                    f"<span style='color:#e8c97a;font-weight:700;font-size:14px;'>{ev['event']}</span>"
+                    f"<span style='color:#3498db;font-size:13px;font-weight:600;'>相似度 {sim_pct}%</span>"
+                    f"</div>"
+                    f"<div style='color:#888;font-size:12px;margin:4px 0;'>{ev.get('description','')}</div>"
+                    f"<div style='display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;'>"
+                    f"<span style='background:{sev_color};color:white;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;'>{sev_label}</span>"
+                    f"<span style='background:rgba(200,146,42,0.2);color:#c8922a;border-radius:4px;padding:2px 8px;font-size:11px;'>{tri_label}</span>"
+                    f"<span style='color:#666;font-size:11px;'>触发日：{ev.get('trigger_date','')}</span>"
+                    f"<span style='color:#2ecc71;font-size:11px;font-weight:600;'>10日实际：{ret_10d_str}</span>"
+                    f"<span style='color:#3498db;font-size:11px;font-weight:600;'>30日实际：{ret_30d_str}</span>"
+                    f"</div></div>",
+                    unsafe_allow_html=True
+                )
 
         report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
         if os.path.exists(report_path):
@@ -1719,28 +1803,67 @@ elif page == "风险预测":
 
     st.divider()
 
-    # ── 模型性能对比 ──────────────────────────────────────────────────
+    # ── 模型性能对比（两套模型整合评估）────────────────────────────────
     st.subheader("模型性能对比（样本外测试集）")
+
     test_start = pred_df.index[int(len(pred_df) * 0.8)]
     test_df    = pred_df.loc[test_start:]
     actual     = test_df["target"]
 
+    # 黑天鹅期间（极端情景模型负责）
+    BS_START = pd.Timestamp("2026-03-02")
+    normal_df  = test_df[test_df.index < BS_START]
+    extreme_df = test_df[test_df.index >= BS_START]
+
+    # 正常期间：XGBoost Enhanced 准确率
     perf = {}
     for version in ["enhanced", "baseline"]:
-        mid   = test_df[f"pred_{version}_mid"]
-        valid = actual.notna() & mid.notna()
-        acc   = np.mean(np.sign(mid[valid]) == np.sign(actual[valid]))
+        mid   = normal_df[f"pred_{version}_mid"]
+        act   = normal_df["target"]
+        valid = act.notna() & mid.notna()
+        acc   = np.mean(np.sign(mid[valid]) == np.sign(act[valid])) if valid.sum() > 0 else 0.5
         perf[version] = round(acc * 100, 2)
 
-    col1, col2, col3 = st.columns(3)
+    # 极端期间：用情景匹配模型的方向（weighted_return_10d 的符号 vs 实际）
+    extreme_acc = None
+    if len(extreme_df) > 0 and extreme_result is not None and extreme_result.get("activated"):
+        pred_dir  = np.sign(extreme_result.get("weighted_return_10d", 0))
+        act_ext   = extreme_df["target"].dropna()
+        if len(act_ext) > 0:
+            extreme_acc = round(
+                float(np.mean(np.sign(act_ext) == pred_dir)) * 100, 2
+            )
+
+    # 综合准确率（加权平均）
+    n_normal  = normal_df["target"].notna().sum()
+    n_extreme = extreme_df["target"].notna().sum()
+    n_total   = n_normal + n_extreme
+    if extreme_acc is not None and n_total > 0:
+        hybrid_acc = round(
+            (perf["enhanced"] * n_normal + extreme_acc * n_extreme) / n_total, 2
+        )
+    else:
+        hybrid_acc = perf["enhanced"]
+
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Enhanced 方向准确率", f"{perf['enhanced']}%",
-                  f"+{round(perf['enhanced']-50,2)}% vs 随机基准")
+        st.metric("综合准确率（双模型）", f"{hybrid_acc}%",
+                  f"+{round(hybrid_acc-50,2)}% vs 随机基准")
     with col2:
-        st.metric("Baseline 方向准确率", f"{perf['baseline']}%",
-                  f"+{round(perf['baseline']-50,2)}% vs 随机基准")
+        st.metric("Enhanced 准确率（正常期）", f"{perf['enhanced']}%",
+                  f"+{round(perf['enhanced']-50,2)}%")
     with col3:
-        st.metric("测试集样本数", f"{len(test_df)} 条")
+        if extreme_acc is not None:
+            st.metric("情景匹配准确率（极端期）", f"{extreme_acc}%",
+                      f"+{round(extreme_acc-50,2)}%")
+        else:
+            st.metric("情景匹配准确率（极端期）", "暂无数据",
+                      "极端期间样本不足")
+    with col4:
+        st.metric("测试集样本数", f"{len(test_df)} 条",
+                  f"正常{n_normal}条 极端{n_extreme}条")
+
+    st.caption("💡 正常市场由 Enhanced XGBoost 负责，极端事件期间自动切换至历史情景匹配模型")
 
     st.divider()
 
