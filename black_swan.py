@@ -270,7 +270,7 @@ def run_deepseek_analysis(signals: dict, recent_news: list = None) -> dict:
     except ImportError:
         return {"error": "openai 库未安装"}
 
-    api_key = os.getenv("DEEPSEEK_API_KEY", "sk-b6728f9e9e6d4c939c8c72a38bc24716")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
         return {"error": "DEEPSEEK_API_KEY 未配置"}
 

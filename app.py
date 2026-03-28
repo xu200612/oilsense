@@ -403,20 +403,22 @@ def get_country_risk():
 
 
 @st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400)
 def auto_update_data():
     try:
         from update_daily import (
             update_oil_prices,
             update_macro_data,
-            update_news_rss,      # RSS很快
+            update_news_rss,
+            update_feature_matrix,    # ← 新增
         )
-        update_oil_prices()       # FRED拉增量，通常0条，很快
-        update_macro_data()       # 同上
-        update_news_rss()         # RSS抓取，约10秒
+        update_oil_prices()
+        update_macro_data()
+        update_news_rss()
+        update_feature_matrix()       # ← 新增
         return datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception as e:
         return f"更新失败: {e}"
-
 with st.spinner("正在检查数据更新..."):
     auto_update_data()
 
@@ -568,9 +570,8 @@ def get_chokepoint_status():
         }
     return status
 
-@st.cache_data(ttl=300)  # 每5分钟刷新一次
+@st.cache_data(ttl=300)
 def get_realtime_price():
-    """从 Yahoo Finance 拉取实时 WTI 价格"""
     try:
         import requests
         url     = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F"
@@ -578,16 +579,13 @@ def get_realtime_price():
         r       = requests.get(url, headers=headers, timeout=10)
         data    = r.json()
         meta    = data["chart"]["result"][0]["meta"]
-        price   = meta["regularMarketPrice"]
-        ts      = meta["regularMarketTime"]
-        date    = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        price   = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")  # ← 修改
+        date    = datetime.today().strftime("%Y-%m-%d")   # ← 改为今天，不用时间戳
         return price, date, True
     except Exception as e:
-        # 失败则回退到 feature_matrix 里的最新价格
         fallback_price = feat["WTI"].iloc[-1]
         fallback_date  = str(feat.index[-1].date())
         return fallback_price, fallback_date, False
-
 feat, model_feature_map, models, importance, sentiment, news = load_assets()
 
 
@@ -905,6 +903,7 @@ if page == "全球能源地图":
             x=0.01, y=0.99
         )
     )
+
 
     st.plotly_chart(fig, use_container_width=True,key="chart_pred")
     # ── 咽喉点航运状态面板 ────────────────────────────────────────────────

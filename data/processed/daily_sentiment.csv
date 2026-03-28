@@ -1,6 +1,9 @@
-﻿date,sentiment_score,news_count,bullish_count,bearish_count,avg_confidence,geopolitics_flag,policy_flag
-2026-03-20,0.571304347826087,8.0,6.0,0.0,0.71875,1.0,0.0
-2026-03-21,0.515,6.0,5.0,0.0,0.6666666666666666,1.0,1.0
-2026-03-22,0.12,6.0,3.0,3.0,0.6666666666666666,1.0,0.0
-2026-03-23,0.2255572065378901,104.0,51.0,23.0,0.6471153846153844,1.0,1.0
-2026-03-24,0.3047457627118644,104.0,62.0,8.0,0.5673076923076923,1.0,1.0
+﻿date,sentiment_score,news_count,bullish_count,bearish_count,neutral_count,avg_confidence,geopolitics_flag,policy_flag,supply_flag,top_bullish,top_bearish
+2026-03-20,0.571304347826087,8,6,0,2,0.71875,1,0,0,Oil Surges as Iran War Escalates,
+2026-03-21,0.515,6,5,0,1,0.6666666666666666,1,1,0,How the Middle East crisis is rewriting energy security doctrine,
+2026-03-22,0.11999999999999998,6,3,3,0,0.6666666666666666,1,0,1,'A direct hit' - BBC visits Israeli town after Iranian strike,"Crude oil export earnings dropped by $5.31bn, says report"
+2026-03-23,0.22555720653789005,104,51,23,30,0.6471153846153845,1,1,1,"World Oil Prices Surge to Near $113 as US-Iran Conflict Disrupts Strait of Hormuz Flows on March 23, 2026",Oil tumbles nearly 11% after Trump puts hold on U.S. strikes against Iran energy infrastructure for five days
+2026-03-24,0.30474576271186443,104,62,8,34,0.5673076923076923,1,1,1,"US strikes over 9,000 targets in Iran — Pentagon",Japan Moves to Release Oil Stockpiles as Energy Crisis Deepens
+2026-03-25,0.09232927970065481,228,92,61,75,0.7032894736842105,1,1,1,QatarEnergy faces $20 billion loss after Iranian missile strikes disrupt global LNG supply,"HPCL, BPCL, IOC shares in focus as crude oil falls below $100 on rising hopes of Iran war ceasefire"
+2026-03-26,0.24583333333333326,54,29,10,15,0.6888888888888891,1,1,1,The Iran War Has Already Unleashed a $25 Billion Energy Repair Bill,CNOOC Ltd Achieves New Production Record
+2026-03-27,0.18102508178844054,68,38,13,17,0.6742647058823531,1,1,1,Global oil prices rise to $104 with latest U.S. diplomatic efforts yielding little progress,USA Crude Oil Stocks Rise by Almost 7MM Barrels WoW
