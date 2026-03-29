@@ -704,7 +704,7 @@ with st.sidebar:
         + risk_label + "</div>", unsafe_allow_html=True
     )
     st.divider()
-    st.caption("数据来源：FRED / EIA / NewsAPI / GDELT / DeepSeek")
+    st.caption("数据来源：FRED / EIA / NewsAPI / GDELT / Claude AI")
     st.caption("注：价格数据存在约2周官方发布延迟")
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -798,12 +798,12 @@ if is_black_swan:
                 st.markdown(analysis)
                 gen_time = report.get("analysis", {}).get("generated_at", "")
                 st.caption("AI 分析生成时间：" + gen_time +
-                           " ｜ 模型：DeepSeek-Chat ｜ 数据源：IMF PortWatch")
+                           " ｜ 模型：Claude Sonnet 4.6 ｜ 数据源：IMF PortWatch")
             else:
                 st.warning("分析报告生成中，请稍后刷新")
         else:
             # 实时生成
-            with st.spinner("正在调用 DeepSeek 进行情景分析..."):
+            with st.spinner("正在调用 Claude 进行情景分析..."):
                 try:
                     from black_swan import get_black_swan_report
                     import black_swan
@@ -1260,7 +1260,7 @@ if page == "全球能源地图":
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "市场概览":
     st.title("市场概览")
-    st.caption("基于最新数据的油市关键指标速览")
+    st.caption("油价驱动因子实时监控 · 供给/需求/金融条件三维分析框架")
 
     # last_low/last_mid/last_high 已在全局计算（含极端模型修正），直接使用
     overview_low, overview_mid, overview_high = last_low, last_mid, last_high
@@ -1491,12 +1491,65 @@ elif page == "市场概览":
             )
             st.markdown(card, unsafe_allow_html=True)
 
+    # ── 花旗企业银行风险敞口速览 ──────────────────────────────────────
+    st.divider()
+    st.subheader("花旗企业银行风险敞口速览")
+    st.caption("基于当前油价水平的行业信用风险与融资需求预判")
+
+    wti_now = rt_price
+    if wti_now < 70:
+        risk_tier = "低油价区间（<$70）"
+        sector_risks = [
+            ("航空业", "🟢 低风险", "燃油成本下降，利润改善，信用状况好转"),
+            ("化工/炼化", "🟢 低风险", "原料成本降低，炼厂利润率扩大"),
+            ("能源生产商", "🔴 高风险", "收入下滑，高杠杆油气公司偿债压力上升"),
+            ("能源贸易商", "🟡 中性", "价差收窄，套利机会减少"),
+        ]
+    elif wti_now < 90:
+        risk_tier = "正常区间（$70-$90）"
+        sector_risks = [
+            ("航空业", "🟡 中性", "燃油成本可控，关注对冲覆盖率"),
+            ("化工/炼化", "🟡 中性", "原料成本适中，产品价差稳定"),
+            ("能源生产商", "🟢 低风险", "价格覆盖成本，现金流健康"),
+            ("能源贸易商", "🟢 低风险", "市场流动性好，贸易融资需求平稳"),
+        ]
+    elif wti_now < 110:
+        risk_tier = "高油价区间（$90-$110）"
+        sector_risks = [
+            ("航空业", "🟠 偏高风险", "燃油成本压力显现，对冲不足者利润收窄"),
+            ("化工/炼化", "🟠 偏高风险", "原料成本传导滞后，短期利润承压"),
+            ("能源生产商", "🟢 低风险", "高油价受益，现金流充裕"),
+            ("能源贸易商", "🟠 偏高风险", "保证金压力上升，贸易融资需求增加"),
+        ]
+    else:
+        risk_tier = "极高油价区间（>$110）"
+        sector_risks = [
+            ("航空业", "🔴 高风险", "燃油成本极高，对冲不足者现金流断裂风险"),
+            ("化工/炼化", "🔴 高风险", "原料成本急升，需求萎缩双重打压"),
+            ("能源生产商", "🟢 低风险", "高价受益，但关注供应中断风险"),
+            ("能源贸易商", "🔴 高风险", "保证金追缴风险高，贸易融资需求激增50%+"),
+        ]
+
+    st.caption(f"当前 WTI ${wti_now:.1f} · {risk_tier}")
+    cols = st.columns(2)
+    for i, (sector, level, desc) in enumerate(sector_risks):
+        color = "#2ecc71" if "🟢" in level else "#e67e22" if "🟠" in level else "#e74c3c" if "🔴" in level else "#f1c40f"
+        with cols[i % 2]:
+            st.markdown(
+                f"<div style='background:rgba(255,255,255,0.04);border-left:3px solid {color};"
+                f"border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;'>"
+                f"<span style='color:#e8c97a;font-weight:700;font-size:13px;'>{sector}</span> "
+                f"<span style='font-size:12px;'>{level}</span>"
+                f"<p style='color:#aaa;font-size:12px;margin:4px 0 0;'>{desc}</p></div>",
+                unsafe_allow_html=True
+            )
+
 # ══════════════════════════════════════════════════════════════════════════
 # 页面三：风险预测
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "风险预测":
-    st.title("风险预测")
-    st.caption("未来10日 WTI 原油价格涨跌幅预测")
+    st.title("油价风险因子分析")
+    st.caption("基于多维因子的油价波动驱动分析与风险量化 · XGBoost + Claude AI 双层模型")
 
     # last_low/last_mid/last_high/extreme_active 等已在全局计算完毕，直接使用
 
@@ -1690,7 +1743,7 @@ elif page == "风险预测":
 
     # ── 报告生成 ──────────────────────────────────────────────────────
     st.subheader("企业银行分析报告")
-    st.caption("由 DeepSeek 生成 · 面向航空、化工、能源贸易商等企业客户")
+    st.caption("由 Claude AI 生成 · 聚焦油价驱动逻辑与因果传导 · 面向花旗企业银行团队及企业客户")
 
     report_path = os.path.join(ROOT_DIR, "data", "raw", "latest_report.json")
     has_cache   = os.path.exists(report_path)
@@ -1717,7 +1770,7 @@ elif page == "风险预测":
         ) if has_cache else False
 
     if gen_report:
-        with st.spinner("正在调用 DeepSeek 生成分析报告，约需10-20秒..."):
+        with st.spinner("正在调用 Claude 生成分析报告，约需15-30秒..."):
             try:
                 from report_generator import generate_report
                 recent_news_list = news.to_dict("records") if len(news) > 0 else []
@@ -1906,10 +1959,14 @@ elif page == "历史回测":
     st.caption("2020年至今 WTI 油价走势与模型预测表现")
 
     CRISIS_EVENTS = [
-        {"date": "2020-03-09", "label": "新冠+油价战争", "color": "#e74c3c"},
-        {"date": "2022-02-24", "label": "俄乌冲突爆发",  "color": "#e67e22"},
-        {"date": "2023-10-07", "label": "以哈冲突爆发",  "color": "#9b59b6"},
-        {"date": "2025-01-20", "label": "特朗普就职",    "color": "#2980b9"},
+        {"date": "2020-03-09", "label": "新冠+油价战争", "color": "#e74c3c",
+         "logic": "需求崩溃（航空停飞）→ 沙俄价格战增产 → 库存积压 → WTI暴跌至负值"},
+        {"date": "2022-02-24", "label": "俄乌冲突爆发",  "color": "#e67e22",
+         "logic": "供给冲击（俄油制裁）→ 欧洲替代供应不足 → 能源安全溢价 → 布伦特飙升至$139"},
+        {"date": "2023-10-07", "label": "以哈冲突爆发",  "color": "#9b59b6",
+         "logic": "地缘风险溢价短暂上升 → 实际供应未中断 → 需求侧走弱主导 → 价格两周内回落"},
+        {"date": "2025-01-20", "label": "特朗普就职",    "color": "#2980b9",
+         "logic": "关税政策不确定性 → 全球需求预期下调 → 美元走强压制油价 → WTI持续承压"},
     ]
 
     col1, col2 = st.columns(2)
@@ -1977,6 +2034,77 @@ elif page == "历史回测":
     fig.update_yaxes(gridcolor="#2d3748")
     fig.update_xaxes(gridcolor="#2d3748")
     st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ── 危机事件驱动逻辑说明 ──────────────────────────────────────────
+    st.subheader("危机事件驱动逻辑回顾")
+    st.caption("油价波动的背后是可解释的因果链，而非随机涨跌")
+    for event in CRISIS_EVENTS:
+        edate = pd.Timestamp(event["date"])
+        if pd.Timestamp(start_date) <= edate <= pd.Timestamp(end_date):
+            st.markdown(
+                f"<div style='border-left:3px solid {event['color']};padding:10px 14px;"
+                f"margin-bottom:8px;background:rgba(255,255,255,0.03);border-radius:0 8px 8px 0;'>"
+                f"<span style='color:{event['color']};font-weight:700;font-size:13px;'>"
+                f"{event['label']}（{event['date']}）</span><br>"
+                f"<span style='color:#aaa;font-size:12px;margin-top:4px;display:block;'>"
+                f"📌 {event['logic']}</span></div>",
+                unsafe_allow_html=True
+            )
+
+    st.divider()
+
+    # ── 银行风险敞口视角 ──────────────────────────────────────────────
+    st.subheader("花旗企业银行视角：各危机期间行业影响")
+    st.caption("油价波动通过不同传导路径影响企业客户的信用风险与融资需求")
+
+    BANK_IMPACT = {
+        "新冠+油价战争": {
+            "航空业":     "燃油成本暴跌但需求归零，现金流断裂，大规模债务重组",
+            "化工/炼化":  "原料成本骤降但库存减值，炼厂开工率降至历史低点",
+            "能源贸易商": "负油价引发史无前例的交割危机，保证金追缴风险爆发",
+            "银行关注":   "🔴 航空客户流动性风险极高，贸易融资抵押品（浮仓原油）价值暴跌",
+        },
+        "俄乌冲突爆发": {
+            "航空业":     "燃油成本急升，对冲覆盖率不足的航司利润骤降",
+            "化工/炼化":  "欧洲炼厂原料断供，亚洲炼厂竞争抢购替代油种",
+            "能源贸易商": "价差扩大带来套利机会，但风险溢价推高营运资金需求",
+            "银行关注":   "🟠 欧洲能源客户信用风险上升，贸易融资需求激增30-50%",
+        },
+        "特朗普就职": {
+            "航空业":     "油价承压减轻燃油成本，但贸易战担忧压制需求预期",
+            "化工/炼化":  "关税不确定性推迟投资决策，原料采购策略保守化",
+            "能源贸易商": "政策不确定性加剧波动，短期套保需求上升",
+            "银行关注":   "🟡 宏观不确定性提升，建议对高杠杆能源客户加强压力测试",
+        },
+    }
+
+    selected_impact = st.selectbox(
+        "选择事件查看银行视角分析",
+        list(BANK_IMPACT.keys()),
+        key="bank_impact_select"
+    )
+
+    if selected_impact in BANK_IMPACT:
+        impact = BANK_IMPACT[selected_impact]
+        cols = st.columns(2)
+        items = list(impact.items())
+        for i, (sector, desc) in enumerate(items[:-1]):
+            with cols[i % 2]:
+                st.markdown(
+                    f"<div style='background:rgba(255,255,255,0.04);border-radius:8px;"
+                    f"padding:10px 12px;margin-bottom:8px;'>"
+                    f"<span style='color:#e8c97a;font-weight:600;font-size:12px;'>{sector}</span>"
+                    f"<p style='color:#aaa;font-size:12px;margin:4px 0 0;'>{desc}</p></div>",
+                    unsafe_allow_html=True
+                )
+        st.markdown(
+            f"<div style='background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.3);"
+            f"border-radius:8px;padding:10px 14px;margin-top:4px;'>"
+            f"<span style='color:#e74c3c;font-size:12px;font-weight:600;'>{impact['银行关注']}</span></div>",
+            unsafe_allow_html=True
+        )
 
     st.divider()
 
