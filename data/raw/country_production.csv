@@ -1,0 +1,14 @@
+﻿country,eia_code,production_mbd,period,source,status,activity,product,updated_at,share_pct
+美国,USA,13.2,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:55:51,12.88
+俄罗斯,RUS,10.3,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:55:53,10.05
+沙特阿拉伯,SAU,9.7,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:55:56,9.46
+伊拉克,IRQ,4.3,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:55:58,4.2
+伊朗,IRN,3.4,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:00,3.32
+阿联酋,ARE,3.3,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:02,3.22
+科威特,KWT,2.7,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:05,2.63
+挪威,NOR,1.8,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:07,1.76
+哈萨克斯坦,KAZ,1.8,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:09,1.76
+尼日利亚,NGA,1.5,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:11,1.46
+利比亚,LBY,1.2,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:14,1.17
+委内瑞拉,VEN,0.9,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:16,0.88
+阿尔及利亚,DZA,0.9,baseline,OilSense baseline; configure EIA_API_KEY for EIA monthly official update,待配置EIA_API_KEY,,,2026-05-14 19:56:18,0.88

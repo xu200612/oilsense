@@ -604,6 +604,32 @@ def get_predictions():
 
 pred_df = get_predictions()
 
+@st.cache_data
+def get_current_prediction():
+    latest_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
+    try:
+        if os.path.exists(latest_path):
+            latest = pd.read_csv(latest_path, index_col=0, parse_dates=True).tail(1)
+            return (
+                float(models["enhanced_low"].predict(latest[model_feature_map["enhanced_low"]])[0]),
+                float(models["enhanced_mid"].predict(latest[model_feature_map["enhanced_mid"]])[0]),
+                float(models["enhanced_high"].predict(latest[model_feature_map["enhanced_high"]])[0]),
+                str(latest.index[-1].date()),
+                "Latest features (Enhanced XGBoost)",
+            )
+    except Exception:
+        pass
+    return (
+        float(pred_df["pred_enhanced_low"].iloc[-1]),
+        float(pred_df["pred_enhanced_mid"].iloc[-1]),
+        float(pred_df["pred_enhanced_high"].iloc[-1]),
+        str(pred_df.index[-1].date()),
+        "Feature matrix (Enhanced XGBoost)",
+    )
+
+
+current_low, current_mid, current_high, current_pred_date, current_model_mode = get_current_prediction()
+
 
 def get_risk_level(low, mid, high):
     spread = high - low
@@ -682,9 +708,9 @@ with st.sidebar:
         label_visibility="visible"
     )
     st.divider()
-    last_low = pred_df["pred_enhanced_low"].iloc[-1]
-    last_mid = pred_df["pred_enhanced_mid"].iloc[-1]
-    last_high = pred_df["pred_enhanced_high"].iloc[-1]
+    last_low = current_low
+    last_mid = current_mid
+    last_high = current_high
     risk_label, risk_color, _ = get_risk_level(last_low, last_mid, last_high)
 
     rt_price, rt_date, rt_live = get_realtime_price()
@@ -715,10 +741,10 @@ is_black_swan, bs_signals = get_black_swan_status()
 
 # ── 全局预测计算（所有页面共用，避免各页面数字不一致）────────────────────
 try:
-    _base_low  = pred_df["pred_enhanced_low"].iloc[-1]
-    _base_mid  = pred_df["pred_enhanced_mid"].iloc[-1]
-    _base_high = pred_df["pred_enhanced_high"].iloc[-1]
-    model_mode = "统计模型（Enhanced XGBoost）"
+    _base_low  = current_low
+    _base_mid  = current_mid
+    _base_high = current_high
+    model_mode = current_model_mode
 except Exception:
     _base_low, _base_mid, _base_high = -0.05, 0.01, 0.05
     model_mode = "默认预测"

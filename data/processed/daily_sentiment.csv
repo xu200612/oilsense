@@ -1,10 +1,24 @@
 ﻿date,sentiment_score,news_count,bullish_count,bearish_count,neutral_count,avg_confidence,geopolitics_flag,policy_flag,supply_flag,sentiment_min,high_conf_bearish_cnt,top_bullish,top_bearish,sentiment_accel
-2026-03-20,0.571304347826087,8,6,0,2,0.71875,1,0,0,0.0,0,Oil Surges as Iran War Escalates,,0.0
-2026-03-21,0.515,6,5,0,1,0.6666666666666666,1,1,0,0.0,0,"Cabinet Secretaries Rule Out Export Restrictions to Curb Gas Prices, Citing Energy Security",,-0.05630434782608695
-2026-03-22,0.12,6,3,3,0,0.6666666666666666,1,0,1,-0.4,0,'A direct hit' - BBC visits Israeli town after Iranian strike,"Crude oil export earnings dropped by $5.31bn, says report",-0.395
-2026-03-23,0.2255572065378901,104,51,23,30,0.6471153846153844,1,1,1,-0.7,0,"World Oil Prices Surge to Near $113 as US-Iran Conflict Disrupts Strait of Hormuz Flows on March 23, 2026",Oil tumbles nearly 11% after Trump puts hold on U.S. strikes against Iran energy infrastructure for five days,0.10555720653789011
-2026-03-24,0.2522554188635032,144,78,13,53,0.5927083333333333,1,1,1,-0.6,0,Iran launches waves of missiles towards Israel,"US Crude Oil, Product Inventories Rise",0.02669821232561312
-2026-03-25,0.08819688598694123,282,114,77,91,0.7060283687943263,1,1,1,-0.7,0,QatarEnergy faces $20 billion loss after Iranian missile strikes disrupt global LNG supply,"BPCL, HPCL, IOC, IndiGo & paint stocks gain as crude prices slide below $100 per barrel",-0.164058532876562
-2026-03-26,0.26451204055766786,57,32,10,15,0.6921052631578948,1,1,1,-0.4,0,The Iran War Has Already Unleashed a $25 Billion Energy Repair Bill,Record Oil and Gas Output Fails to Shield CNOOC from Market Volatility,0.17631515457072663
-2026-03-27,0.2279129321382843,114,66,20,28,0.6850877192982454,1,1,1,-0.7,0,Oil Jumps as War Risks Intensify,USA Crude Oil Stocks Rise by Almost 7MM Barrels WoW,-0.03659910841938355
-2026-03-28,0.46818181818181814,7,5,0,2,0.6285714285714284,1,0,0,0.0,0,Iran war live: Trump again slams NATO’s lack of support for war on Tehran,,0.24026888604353383
+2026-03-27,0.18459715639810426,67,27,20,20,0.6298507462686568,1,1,1,-0.6,0,Israel attacks major industrial and nuclear sites in Iran,USA Crude Oil Stocks Rise by Almost 7MM Barrels WoW,0.0
+2026-03-28,0.2157549234135667,35,18,5,12,0.6528571428571428,1,1,1,-0.4,0,Analysis: A new oil shock is building. The next few weeks of war will be decisive for the economy.,Is It Time for Energy Rationing to Return?,0.03115776701546244
+2026-03-29,0.3912087912087912,7,5,0,2,0.65,1,0,0,0.0,0,"As war on Iran enters second month, Yemen’s Houthis open new front",,0.1754538677952245
+2026-03-30,0.09523809523809523,20,5,6,9,0.6299999999999999,1,1,1,-0.6,0,Oil rises and Asia shares slide as Iran war enters fifth week,"India flags slower growth, wider deficit as Iran war raises the stakes for New Delhi",-0.295970695970696
+2026-03-31,-0.05333333333333333,38,7,17,14,0.6710526315789473,1,0,1,-0.7,0,Iran Strikes Loaded Kuwait Oil Tanker off Dubai,US Crude Oil Inventories See Surprise 10 Million Barrel Spike,-0.14857142857142858
+2026-04-01,-0.07889908256880733,25,4,9,12,0.654,1,1,1,-0.7,0,OPEC Output Plunges by 7 Million Bpd as War Chokes Supply,Brent Oil Dips Below $100 as Trump Signals End to Iran War,-0.025565749235474
+2026-04-22,0.0,1,0,0,1,0.6,0,1,0,0.0,0,,,0.07889908256880733
+2026-04-27,-0.3,1,0,1,0,0.5,1,0,0,-0.3,0,,The Iran War Is Impacting the Environment in Unseen Ways,-0.3
+2026-04-28,-0.5363636363636363,6,0,6,0,0.7333333333333334,1,1,1,-0.7,0,,UAE To Leave OPEC Amid Hormuz Oil Crisis,-0.23636363636363628
+2026-04-29,-0.07169811320754717,7,2,4,1,0.7571428571428572,1,0,1,-0.6,0,Saudi giant extends suspension on LPG deliveries after key site damaged – Bloomberg,Revenge Is A Dish Best Served Cold. Russia Deals Germany Impeccably Timed Oil Blow,0.4646655231560891
+2026-04-30,0.021428571428571432,7,1,2,4,0.6,1,1,1,-0.4,0,Ukraine expands oil strikes on Russia as Putin proposes brief ceasefire,UAE exit signals OPEC’s declining grip on oil markets,0.0931266846361186
+2026-05-01,-0.05,2,0,1,1,0.6,1,1,0,-0.2,0,,Will Colombia summit kick-start the end of the fossil fuel era?,-0.07142857142857144
+2026-05-02,0.6999999999999998,1,1,0,0,0.8,1,0,0,0.0,0,Saudi Arabia Set for Oil Windfall After Hormuz Boosts Prices,,0.7499999999999999
+2026-05-03,-0.0045454545454545366,3,1,2,0,0.7333333333333334,0,0,1,-0.4,0,Ukraine hits key Russian oil-loading port and 3 'shadow fleet' tankers,"Algeria, six nations to raise oil output by 188,000 bpd in June - aps.dz",-0.7045454545454544
+2026-05-04,0.2700000000000001,4,1,1,2,0.49999999999999994,1,0,0,-0.3,0,Oil Prices Surge After Iran Hits UAE Oil Facility With Drone and US Sinks 6 Iranian Boats,Sweden arrests Chinese captain of suspected Russia-linked vessel,0.2745454545454546
+2026-05-05,0.32,3,1,0,2,0.5,0,0,1,0.0,0,Kuwaiti oil price surges USD 7.11 to reach USD 119.43 per barrel - General - 05/05/2026 - kuna.net.kw,,0.04999999999999993
+2026-05-06,-0.11199999999999999,4,1,2,1,0.625,1,0,1,-0.4,0,Adnoc Appears to Export Second LNG Shipment Through Hormuz,Oil prices ease as US seeks reopening of the Hormuz Strait,-0.432
+2026-05-07,0.0816326530612245,7,4,3,0,0.7000000000000001,1,0,1,-0.6,0,Trump Cannot Just Win the Strait. He Has to Win the Oil Curve,Venezuela Lands Billions in Oil Deals as Industry Rushes Back,0.19363265306122449
+2026-05-08,0.051282051282051294,17,6,8,3,0.6882352941176471,1,1,1,-0.6,0,Oil Prices Whipsaw as U.S.-Iran Conflict Shakes Markets,Why the UAE Left OPEC,-0.030350601779173203
+2026-05-09,0.18476821192052983,14,3,2,9,0.5392857142857143,1,0,1,-0.3,0,Iran War Threatens Gulf Investment Boom in Central Asia,Trump Could Tap Oil under U.S. Military Bases to Top Strategic Reserve,0.13348616063847854
+2026-05-10,0.006832298136645966,27,5,12,10,0.5962962962962962,1,1,1,-0.4,0,Saudi Aramco Q1 profit jumps 26% as key pipeline reaches capacity amid Iran war,Libya’s Zawiya refinery resumes full operations,-0.17793591378388388
+2026-05-11,0.07868020304568528,48,11,15,22,0.615625,1,1,1,-0.7,0,Oil prices jump after Trump dismisses Iran proposal to end war,Trump says ceasefire is on ‘life support’ after rejecting Iran’s proposal,0.0718479049090393
+2026-05-12,-0.002941176470588238,6,1,3,2,0.5666666666666667,1,0,0,-0.3,0,Oil prices extend gains as Trump comments diminish hopes for a U.S.-Iran peace deal,Trump says Iran ceasefire is on 'massive life support',-0.08162137951627352
