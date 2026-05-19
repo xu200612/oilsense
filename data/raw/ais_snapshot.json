@@ -7,7 +7,7 @@
     "importance": "全球20%石油贸易经过此处",
     "ratio": 0.0,
     "ais_coverage": true,
-    "timestamp": "2026-03-27 13:33:20"
+    "timestamp": "2026-05-18 10:51:47"
   },
   "曼德海峡": {
     "count": 0,
@@ -17,7 +17,7 @@
     "importance": "红海通往印度洋的唯一通道",
     "ratio": 0.0,
     "ais_coverage": false,
-    "timestamp": "2026-03-27 13:33:20"
+    "timestamp": "2026-05-18 10:51:47"
   },
   "苏伊士运河": {
     "count": 0,
@@ -27,26 +27,26 @@
     "importance": "欧洲与亚洲最短海上航线",
     "ratio": 0.0,
     "ais_coverage": false,
-    "timestamp": "2026-03-27 13:33:20"
+    "timestamp": "2026-05-18 10:51:47"
   },
   "马六甲海峡": {
-    "count": 340,
+    "count": 135,
     "normal_count": 85,
     "risk": "正常",
     "color": "#2ecc71",
     "importance": "中东原油运往亚洲的主要通道",
-    "ratio": 400.0,
+    "ratio": 158.8,
     "ais_coverage": true,
-    "timestamp": "2026-03-27 13:33:20"
+    "timestamp": "2026-05-18 10:51:47"
   },
   "博斯普鲁斯海峡": {
-    "count": 9,
+    "count": 7,
     "normal_count": 12,
-    "risk": "中等风险",
-    "color": "#f1c40f",
+    "risk": "高风险",
+    "color": "#e67e22",
     "importance": "俄罗斯黑海原油出口唯一通道",
-    "ratio": 75.0,
+    "ratio": 58.3,
     "ais_coverage": true,
-    "timestamp": "2026-03-27 13:33:20"
+    "timestamp": "2026-05-18 10:51:47"
   }
 }

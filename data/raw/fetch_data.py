@@ -58,6 +58,7 @@ def fetch_macro_data(start="2020-01-01"):
         "GPR": "GPR_USA",   # 地缘政治风险指数（正确ID）
         "US_EPU": "USEPUINDXD",  # 美国经济政策不确定性
         "GLOBAL_EPU" : "GEPUCURRENT", # 全球经济不确定性（正确ID）
+        "US_PPI": "PPIACO",  # 美国生产者价格指数
     }
 
     frames = {}

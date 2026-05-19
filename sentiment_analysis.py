@@ -9,6 +9,15 @@ from datetime import datetime, timedelta
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
+LEGACY_ENV_PATH = os.path.join(
+    os.path.dirname(ROOT_DIR),
+    "OilSense 原油风险智能预警系统",
+    "技术文档",
+    "OilSense_源代码",
+    ".env",
+)
+if os.path.exists(LEGACY_ENV_PATH):
+    load_dotenv(dotenv_path=LEGACY_ENV_PATH)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
@@ -60,7 +69,7 @@ Respond with valid JSON only."""
 
 
 # ── 增量分析：只处理未分析过的新闻 ───────────────────────────────────────
-def incremental_sentiment_analysis(max_articles=100):
+def incremental_sentiment_analysis(max_articles=150):
     """
     只分析新增的新闻，避免重复消耗API额度
     max_articles: 每次最多处理多少条新文章
@@ -215,4 +224,4 @@ def get_latest_sentiment_summary(days=7):
 
 
 if __name__ == "__main__":
-    incremental_sentiment_analysis(max_articles=50)
+    incremental_sentiment_analysis(max_articles=150)

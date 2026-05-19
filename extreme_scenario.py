@@ -345,7 +345,8 @@ def find_similar_events(current_features: pd.Series, top_k: int = 3) -> list:
 
 
 def get_extreme_prediction(current_features: pd.Series, base_low: float,
-                           base_mid: float, base_high: float) -> dict:
+                           base_mid: float, base_high: float,
+                           force_activate: bool = False) -> dict:
     """
     第二层极端事件预测
     激活条件：高波动 或 VIX恐慌 或 航运异常
@@ -358,7 +359,7 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
     gdelt_ci  = float(current_features.get("gdelt_conflict_intensity", 0))
 
     # 激活条件（任意一个触发）
-    is_extreme = (
+    is_extreme = force_activate or (
         vol_ratio      > 2.0  or
         vix            > 30   or
         abs(hormuz_z)  > 2.0  or

@@ -26,6 +26,7 @@ def load_and_merge():
                       index_col=0, parse_dates=True)
     macro = pd.read_csv(os.path.join(ROOT_DIR, "data", "raw", "macro_data.csv"),
                         index_col=0, parse_dates=True)
+    macro = macro.sort_index().resample("D").last().ffill()
     sentiment = pd.read_csv(
         os.path.join(ROOT_DIR, "data", "processed", "daily_sentiment.csv"),
         parse_dates=["date"]).set_index("date")
@@ -78,6 +79,7 @@ def load_and_merge():
     else:
         print("  PortWatch 数据未找到，跳过（运行 python fetch_portwatch.py 生成）")
 
+    df.dropna(axis=1, how="all", inplace=True)
     df.ffill(inplace=True)
     df.dropna(inplace=True)
     print("  合并后数据：" + str(len(df)) + " 条，" + str(df.shape[1]) + " 个字段")
@@ -164,8 +166,6 @@ def build_features(df, target_col="WTI", horizon=10):
         "hormuz_tanker_ma7", "hormuz_tanker_zscore", "hormuz_blocked",
         "mandeb_tanker_ma7", "mandeb_blocked",
         "cape_reroute_signal",
-        # 宏观补充
-        "US_PPI",
     ]
 
     # Baseline 特征集（仅传统量化因子）

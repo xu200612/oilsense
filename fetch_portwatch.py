@@ -26,6 +26,11 @@ CHOKEPOINTS = {
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+def parse_portwatch_date(value):
+    if isinstance(value, str):
+        return pd.to_datetime(value, errors="coerce").strftime("%Y-%m-%d")
+    return datetime.utcfromtimestamp((value or 0) / 1000).strftime("%Y-%m-%d")
+
 def fetch_chokepoint_range(portid, start_year=2019, end_year=2026):
     """拉取单个咽喉点的全部历史数据"""
     all_records = []
@@ -58,7 +63,7 @@ def fetch_chokepoint_range(portid, start_year=2019, end_year=2026):
             a = feat["attributes"]
             # ArcGIS 时间戳是毫秒
             ts   = a.get("date", 0)
-            date = datetime.utcfromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+            date = parse_portwatch_date(ts)
             all_records.append({
                 "date"            : date,
                 "portid"          : a.get("portid", ""),

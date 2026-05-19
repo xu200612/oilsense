@@ -1,5 +1,6 @@
 # update_daily.py
 import os
+import re
 import time
 import requests
 import feedparser
@@ -9,14 +10,76 @@ from dotenv import load_dotenv
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
+LEGACY_ENV_PATH = os.path.join(
+    os.path.dirname(ROOT_DIR),
+    "OilSense 原油风险智能预警系统",
+    "技术文档",
+    "OilSense_源代码",
+    ".env",
+)
+if os.path.exists(LEGACY_ENV_PATH):
+    load_dotenv(dotenv_path=LEGACY_ENV_PATH)
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 FRED_API_KEY = os.getenv("FRED_API_KEY")
+EIA_API_KEY  = os.getenv("EIA_API_KEY")
 
 PORTWATCH_URL = (
     "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services"
     "/Daily_Chokepoints_Data/FeatureServer/0/query"
 )
+
+def _parse_portwatch_date(value):
+    if isinstance(value, str):
+        return pd.to_datetime(value, errors="coerce").strftime("%Y-%m-%d")
+    return datetime.utcfromtimestamp((value or 0) / 1000).strftime("%Y-%m-%d")
+
+
+def _fetch_yahoo_chart_daily(symbol, name, start_date=None, days_back=30):
+    end_dt = datetime.now() + timedelta(days=1)
+    if start_date is None:
+        start_dt = datetime.now() - timedelta(days=days_back)
+    else:
+        start_dt = pd.to_datetime(start_date).to_pydatetime() - timedelta(days=3)
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {
+        "period1": int(start_dt.timestamp()),
+        "period2": int(end_dt.timestamp()),
+        "interval": "1d",
+        "events": "history",
+        "includeAdjustedClose": "true",
+    }
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, params=params, headers=headers, timeout=15)
+    r.raise_for_status()
+    result = r.json()["chart"]["result"][0]
+    timestamps = result.get("timestamp", [])
+    quote = result.get("indicators", {}).get("quote", [{}])[0]
+    closes = quote.get("close", [])
+    if not timestamps or not closes:
+        return pd.Series(dtype="float64", name=name)
+    idx = pd.to_datetime(timestamps, unit="s").normalize()
+    s = pd.Series(closes, index=idx, name=name).dropna()
+    s = s[~s.index.duplicated(keep="last")]
+    return s
+
+
+def _fetch_yahoo_oil_prices(start_date=None):
+    frames = {}
+    for symbol, name in [("CL=F", "WTI"), ("BZ=F", "Brent")]:
+        try:
+            s = _fetch_yahoo_chart_daily(symbol, name, start_date=start_date)
+            frames[name] = s
+            print(f"  Yahoo {name} ✓  {len(s)} 条")
+        except Exception as e:
+            print(f"  Yahoo {name} 失败: {e}")
+    if not frames:
+        return pd.DataFrame()
+    df = pd.DataFrame(frames).dropna(how="all")
+    df.index = pd.to_datetime(df.index)
+    return df
+
 CHOKEPOINTS = {
     "chokepoint6" : "霍尔木兹海峡",
     "chokepoint4" : "曼德海峡",
@@ -84,6 +147,55 @@ TIER2_KEYWORDS = [
     ("Venezuela oil",      10),
 ]
 
+COUNTRY_KEYWORDS = {
+    "美国"    : ["United States", "U.S.", "US", "America", "American", "Washington", "Trump", "Biden", "shale", "Permian"],
+    "俄罗斯"  : ["Russia", "Russian", "Moscow", "Kremlin"],
+    "沙特阿拉伯": ["Saudi", "Saudi Arabia", "Riyadh", "Aramco"],
+    "伊拉克"  : ["Iraq", "Iraqi", "Baghdad", "Kirkuk", "Basra"],
+    "伊朗"    : ["Iran", "Iranian", "Tehran", "Hormuz"],
+    "阿联酋"  : ["UAE", "United Arab Emirates", "Dubai", "Abu Dhabi"],
+    "科威特"  : ["Kuwait", "Kuwaiti"],
+    "挪威"    : ["Norway", "Norwegian", "Equinor"],
+    "哈萨克斯坦": ["Kazakhstan", "Kazakh", "CPC pipeline"],
+    "尼日利亚": ["Nigeria", "Nigerian"],
+    "利比亚"  : ["Libya", "Libyan", "Tripoli"],
+    "委内瑞拉": ["Venezuela", "Venezuelan", "Maduro"],
+    "阿尔及利亚": ["Algeria", "Algerian", "Sonatrach"],
+}
+
+COUNTRY_NEWS_QUERIES = [
+    ("美国", "United States oil OR shale oil OR crude oil"),
+    ("俄罗斯", "Russia oil OR Russian crude OR energy sanctions"),
+    ("沙特阿拉伯", "Saudi Arabia oil OR Aramco OR OPEC"),
+    ("伊拉克", "Iraq oil OR Basra crude OR OPEC"),
+    ("伊朗", "Iran oil OR Hormuz OR sanctions"),
+    ("阿联酋", "UAE oil OR Abu Dhabi oil OR ADNOC"),
+    ("科威特", "Kuwait oil OR Kuwaiti crude"),
+    ("挪威", "Norway oil OR Equinor OR North Sea oil"),
+    ("哈萨克斯坦", "Kazakhstan oil OR CPC pipeline OR Kazakh crude"),
+    ("尼日利亚", "Nigeria oil OR Nigerian crude"),
+    ("利比亚", "Libya oil OR Libyan crude"),
+    ("委内瑞拉", "Venezuela oil OR Venezuelan crude OR Maduro"),
+    ("阿尔及利亚", "Algeria oil OR Sonatrach OR Algerian gas"),
+]
+
+COUNTRY_PRODUCTION_BASELINE = {
+    "美国": ("USA", 13.2),
+    "俄罗斯": ("RUS", 10.3),
+    "沙特阿拉伯": ("SAU", 9.7),
+    "伊拉克": ("IRQ", 4.3),
+    "伊朗": ("IRN", 3.4),
+    "阿联酋": ("ARE", 3.3),
+    "科威特": ("KWT", 2.7),
+    "挪威": ("NOR", 1.8),
+    "哈萨克斯坦": ("KAZ", 1.8),
+    "尼日利亚": ("NGA", 1.5),
+    "利比亚": ("LBY", 0.9),
+    "委内瑞拉": ("VEN", 0.9),
+    "阿尔及利亚": ("DZA", 0.9),
+}
+WORLD_OIL_SUPPLY_MBD = 102.5
+
 AIS_CHOKEPOINTS = {
     "霍尔木兹海峡" : {"min_lat": 25.5, "max_lat": 27.5, "min_lon": 55.5, "max_lon": 57.5,  "normal_count": 32, "importance": "全球20%石油贸易经过此处",    "coverage": True},
     "曼德海峡"     : {"min_lat": 11.0, "max_lat": 13.5, "min_lon": 42.5, "max_lon": 44.5,  "normal_count": 18, "importance": "红海通往印度洋的唯一通道",    "coverage": False},
@@ -105,8 +217,7 @@ def _safe_concat(a, b):
 def _merge_indexed(existing, new_df):
     if len(existing) == 0:
         return new_df
-    combined = _safe_concat(existing, new_df)
-    combined = combined[~combined.index.duplicated(keep="last")]
+    combined = new_df.combine_first(existing)
     combined.sort_index(inplace=True)
     return combined
 
@@ -123,8 +234,36 @@ def _merge_news(existing, new_df):
 
 
 def _is_oil_related(title, summary=""):
-    text = (title + " " + summary).lower()
+    text = (str(title or "") + " " + str(summary or "")).lower()
     return any(kw.lower() in text for kw in OIL_KEYWORDS)
+
+
+def _detect_country_focus(title, summary=""):
+    text = (str(title or "") + " " + str(summary or "")).lower()
+    hits = []
+    for country, keywords in COUNTRY_KEYWORDS.items():
+        for kw in keywords:
+            pattern = r"\b" + re.escape(kw.lower()) + r"\b"
+            if re.search(pattern, text):
+                hits.append(country)
+                break
+    return ";".join(hits)
+
+
+def _tag_country_focus(df):
+    if len(df) == 0:
+        return df
+    if "country_focus" not in df.columns:
+        df["country_focus"] = ""
+    for idx, row in df.iterrows():
+        current = row.get("country_focus", "")
+        if pd.notna(current) and str(current).strip():
+            continue
+        df.at[idx, "country_focus"] = _detect_country_focus(
+            str(row.get("title", "")),
+            str(row.get("description", "")),
+        )
+    return df
 
 
 def _parse_rss_date(entry):
@@ -144,8 +283,6 @@ def _parse_rss_date(entry):
 def update_oil_prices():
     print("\n[油价] 增量更新...")
     try:
-        from fredapi import Fred
-        fred     = Fred(api_key=FRED_API_KEY)
         out_path = os.path.join(ROOT_DIR, "data", "raw", "oil_prices.csv")
 
         if os.path.exists(out_path):
@@ -157,24 +294,37 @@ def update_oil_prices():
 
         print(f"  起始日期: {start}")
         frames = {}
-        for name, code in [("WTI", "DCOILWTICO"), ("Brent", "DCOILBRENTEU")]:
+        if FRED_API_KEY:
             try:
-                s = fred.get_series(code, observation_start=start)
-                frames[name] = s
-                print(f"  {name} ✓  新增 {len(s)} 条")
+                from fredapi import Fred
+                fred = Fred(api_key=FRED_API_KEY)
+                for name, code in [("WTI", "DCOILWTICO"), ("Brent", "DCOILBRENTEU")]:
+                    try:
+                        s = fred.get_series(code, observation_start=start)
+                        frames[name] = s
+                        print(f"  FRED {name} ✓  新增 {len(s)} 条")
+                    except Exception as e:
+                        print(f"  FRED {name} 失败: {e}")
             except Exception as e:
-                print(f"  {name} 失败: {e}")
+                print(f"  FRED跳过: {e}")
+        else:
+            print("  FRED_API_KEY未配置，跳过FRED")
 
-        if not frames:
+        new_df = pd.DataFrame(frames).dropna(how="all") if frames else pd.DataFrame()
+        if len(new_df) > 0:
+            new_df.index = pd.to_datetime(new_df.index)
+
+        yahoo_df = _fetch_yahoo_oil_prices(start_date=start)
+        if len(yahoo_df) > 0:
+            new_df = yahoo_df.combine_first(new_df) if len(new_df) > 0 else yahoo_df
+
+        if len(new_df) == 0:
             print("  无新数据")
             return
 
-        new_df       = pd.DataFrame(frames)
-        new_df.index = pd.to_datetime(new_df.index)
-        new_df       = new_df.dropna(how="all")
         combined     = _merge_indexed(existing, new_df)
         combined.to_csv(out_path)
-        print(f"  完成，共 {len(combined)} 条")
+        print(f"  完成，共 {len(combined)} 条，截至 {combined.index.max().date()}")
 
     except Exception as e:
         print(f"  失败: {e}")
@@ -212,9 +362,20 @@ def update_macro_data():
         frames = {}
         for name, code in series.items():
             try:
-                s = fred.get_series(code, observation_start=start)
+                series_start = start
+                if len(existing) > 0:
+                    first_existing = existing.index.min().strftime("%Y-%m-%d")
+                    needs_backfill = (
+                        name not in existing.columns or
+                        existing[name].dropna().empty or
+                        existing[name].first_valid_index() > existing.index.min() + pd.Timedelta(days=45)
+                    )
+                    if needs_backfill:
+                        series_start = first_existing
+                s = fred.get_series(code, observation_start=series_start)
                 frames[name] = s
-                print(f"  {name} ✓  新增 {len(s)} 条")
+                label = "回填/更新" if series_start != start else "新增"
+                print(f"  {name} ✓  {label} {len(s)} 条")
             except Exception as e:
                 print(f"  {name} 失败: {e}")
 
@@ -282,11 +443,46 @@ def update_news_api():
                         "source"      : src,
                         "keyword"     : keyword,
                         "url"         : a.get("url", ""),
+                        "country_focus": _detect_country_focus(a["title"], a.get("description", "")),
                     })
                     added += 1
                 print(f"  '{keyword}' ✓  {added} 条")
             except Exception as e:
                 print(f"  '{keyword}' 失败: {e}")
+
+        for country, query in COUNTRY_NEWS_QUERIES:
+            try:
+                resp = newsapi.get_everything(
+                    q          = query,
+                    from_param = start_date.strftime("%Y-%m-%d"),
+                    to         = end_date.strftime("%Y-%m-%d"),
+                    language   = "en",
+                    sort_by    = "relevancy",
+                    page_size  = 20,
+                )
+                added = 0
+                for a in resp.get("articles", []):
+                    title = a.get("title", "")
+                    desc  = a.get("description", "")
+                    if not title or not _is_oil_related(title, desc):
+                        continue
+                    src = a["source"]["name"]
+                    focus = _detect_country_focus(title, desc)
+                    if country not in focus:
+                        focus = (focus + ";" if focus else "") + country
+                    all_articles.append({
+                        "date"        : a["publishedAt"][:10],
+                        "title"       : title,
+                        "description" : desc,
+                        "source"      : src,
+                        "keyword"     : "country:" + country,
+                        "url"         : a.get("url", ""),
+                        "country_focus": focus,
+                    })
+                    added += 1
+                print(f"  '{country}' 产油国新闻 ✓  {added} 条")
+            except Exception as e:
+                print(f"  '{country}' 产油国新闻失败: {e}")
 
         if not all_articles:
             print("  无新数据")
@@ -294,6 +490,7 @@ def update_news_api():
 
         new_df   = pd.DataFrame(all_articles).drop_duplicates(subset=["title"])
         combined = _merge_news(existing, new_df)
+        combined = _tag_country_focus(combined)
         combined.to_csv(out_path, index=False, encoding="utf-8-sig")
         print(f"  NewsAPI完成，共 {len(combined)} 条")
 
@@ -335,6 +532,7 @@ def update_news_rss():
                         "source"      : source_name,
                         "keyword"     : "rss",
                         "url"         : link,
+                        "country_focus": _detect_country_focus(title, summary),
                     })
                     count += 1
                 print(f"  {source_name.ljust(22)} {count} 条 ✓")
@@ -348,6 +546,7 @@ def update_news_rss():
 
         new_df   = pd.DataFrame(articles).drop_duplicates(subset=["title"])
         combined = _merge_news(existing, new_df)
+        combined = _tag_country_focus(combined)
         combined.to_csv(out_path, index=False, encoding="utf-8-sig")
         print(f"  RSS完成，共 {len(combined)} 条")
 
@@ -362,7 +561,7 @@ def update_sentiment():
     print("\n[情感] 增量情感分析...")
     try:
         from sentiment_analysis import incremental_sentiment_analysis
-        incremental_sentiment_analysis(max_articles=50)
+        incremental_sentiment_analysis(max_articles=150)
     except Exception as e:
         print(f"  失败: {e}")
 
@@ -389,8 +588,8 @@ def update_portwatch():
             print("  已是最新，跳过")
             return
 
-        start_ts = int(start_dt.timestamp() * 1000)
-        end_ts   = int(datetime.today().timestamp() * 1000)
+        start_str = start_dt.strftime("%Y-%m-%d")
+        end_str   = datetime.today().strftime("%Y-%m-%d")
         headers  = {"User-Agent": "Mozilla/5.0"}
         all_dfs  = []
 
@@ -401,7 +600,7 @@ def update_portwatch():
 
             while True:
                 params = {
-                    "where"            : f"portid='{portid}' AND date >= {start_ts} AND date <= {end_ts}",
+                    "where"            : f"portid='{portid}' AND date >= DATE '{start_str}' AND date <= DATE '{end_str}'",
                     "outFields"        : "date,portid,portname,n_tanker,n_total,capacity_tanker,capacity",
                     "resultRecordCount": 2000,
                     "resultOffset"     : offset,
@@ -422,7 +621,7 @@ def update_portwatch():
                 for feat in features:
                     a = feat["attributes"]
                     records.append({
-                        "date"           : datetime.utcfromtimestamp(a.get("date", 0) / 1000).strftime("%Y-%m-%d"),
+                        "date"           : _parse_portwatch_date(a.get("date")),
                         "n_tanker"       : a.get("n_tanker", 0),
                         "n_total"        : a.get("n_total", 0),
                         "capacity_tanker": a.get("capacity_tanker", 0),
@@ -529,7 +728,8 @@ def update_ais():
             counts = {name: 0 for name in AIS_CHOKEPOINTS}
             try:
                 async with websockets.connect(
-                    url, ping_interval=20, ping_timeout=30, close_timeout=10
+                    url, open_timeout=35, ping_interval=20, ping_timeout=30,
+                    close_timeout=10, proxy=None
                 ) as ws:
                     await ws.send(json.dumps(subscribe_msg))
                     start = time.time()
@@ -551,6 +751,7 @@ def update_ais():
                             continue
             except Exception as e:
                 print(f"  AIS连接错误: {e}")
+                return None
             return counts
 
         try:
@@ -560,6 +761,10 @@ def update_ais():
             counts = loop.run_until_complete(fetch())
         except RuntimeError:
             counts = asyncio.run(fetch())
+
+        if counts is None:
+            print("  AIS快照未更新：连接失败，保留上一次有效快照")
+            return
 
         results = {}
         for name, info in AIS_CHOKEPOINTS.items():
@@ -586,6 +791,98 @@ def update_ais():
     except Exception as e:
         print(f"  失败: {e}")
 
+
+def update_country_production_data():
+    print("\n[产油国实时/准实时产量] 更新...")
+    out_path = os.path.join(ROOT_DIR, "data", "raw", "country_production.csv")
+    rows = []
+    api_key = os.getenv("EIA_API_KEY", "")
+    session = requests.Session()
+    session.trust_env = False
+
+    if api_key:
+        for country_cn, (eia_code, baseline) in COUNTRY_PRODUCTION_BASELINE.items():
+            got = False
+            try:
+                r = session.get(
+                    "https://api.eia.gov/v2/international/data/",
+                    params={
+                        "api_key": api_key,
+                        "frequency": "monthly",
+                        "data[0]": "value",
+                        "facets[countryRegionId][]": eia_code,
+                        "facets[productId][]": "55",
+                        "sort[0][column]": "period",
+                        "sort[0][direction]": "desc",
+                        "offset": 0,
+                        "length": 20,
+                    },
+                    headers={"User-Agent": "OilSenseAcademicPrototype/1.0"},
+                    timeout=25,
+                    verify=False,
+                )
+                if r.status_code != 200:
+                    print(f"  {country_cn}/EIA HTTP {r.status_code}: {r.text[:120]}")
+                else:
+                    data = r.json().get("response", {}).get("data", [])
+                    production_rows = [
+                        x for x in data
+                        if "production" in str(x.get("activityName", x.get("activityId", ""))).lower()
+                    ]
+                    item = production_rows[0] if production_rows else (data[0] if data else None)
+                    if item:
+                        value = float(item.get("value", baseline))
+                        mbd = value / 1000 if value > 100 else value
+                        rows.append({
+                            "country": country_cn,
+                            "eia_code": eia_code,
+                            "production_mbd": round(mbd, 3),
+                            "period": item.get("period", ""),
+                            "source": "EIA International monthly API",
+                            "status": "准实时（月度官方）",
+                            "activity": item.get("activityName", item.get("activityId", "")),
+                            "product": item.get("productName", item.get("productId", "")),
+                            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        })
+                        got = True
+            except Exception as e:
+                print(f"  {country_cn}/EIA失败: {str(e)[:100]}")
+
+            if not got:
+                rows.append({
+                    "country": country_cn,
+                    "eia_code": eia_code,
+                    "production_mbd": baseline,
+                    "period": "baseline",
+                    "source": "OilSense baseline; EIA query failed or returned no production row",
+                    "status": "EIA回退基线",
+                    "activity": "",
+                    "product": "",
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                })
+            time.sleep(0.2)
+    else:
+        print("  未配置 EIA_API_KEY，写入可解释基线；页面会标注非实时")
+        for country_cn, (eia_code, baseline) in COUNTRY_PRODUCTION_BASELINE.items():
+            rows.append({
+                "country": country_cn,
+                "eia_code": eia_code,
+                "production_mbd": baseline,
+                "period": "baseline",
+                "source": "OilSense baseline; configure EIA_API_KEY for EIA monthly official update",
+                "status": "待配置EIA_API_KEY",
+                "activity": "",
+                "product": "",
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+
+    df = pd.DataFrame(rows)
+    df["share_pct"] = (df["production_mbd"] / WORLD_OIL_SUPPLY_MBD * 100).round(2)
+    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    official = int((df["status"] == "准实时（月度官方）").sum())
+    print(f"  产油国产量表已保存：{len(df)} 个国家，EIA官方 {official} 个")
+
+
 def update_feature_matrix():
     print("[特征矩阵] 增量更新...")
     try:
@@ -593,14 +890,9 @@ def update_feature_matrix():
 
         raw_df = load_and_merge()
 
-        # 尝试用雅虎财经补充最新价格
+        # 尝试用 Yahoo Chart API 补充最新价格，避免 yfinance 本地缓存报错
         try:
-            import yfinance as yf
-            wti   = yf.Ticker("CL=F").history(period="5d")[["Close"]].rename(columns={"Close": "WTI"})
-            brent = yf.Ticker("BZ=F").history(period="5d")[["Close"]].rename(columns={"Close": "Brent"})
-            wti.index   = pd.to_datetime(wti.index).tz_localize(None)
-            brent.index = pd.to_datetime(brent.index).tz_localize(None)
-            yf_new = wti.join(brent, how="outer")
+            yf_new = _fetch_yahoo_oil_prices(start_date=raw_df.index.max())
             yf_new = yf_new[yf_new.index > raw_df.index.max()]
             if len(yf_new) > 0:
                 for col in raw_df.columns:
@@ -675,6 +967,7 @@ def run_update():
     update_news_rss()
     update_sentiment()
     update_portwatch()
+    update_country_production_data()
     update_feature_matrix()
     # AIS单独手动跑，不在自动流程里（耗时120秒）
     # update_ais()

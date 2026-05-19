@@ -1,4 +1,5 @@
 import os
+import re
 import joblib
 import numpy as np
 import pandas as pd
@@ -12,6 +13,15 @@ from datetime import datetime
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
+LEGACY_ENV_PATH = os.path.join(
+    os.path.dirname(ROOT_DIR),
+    "OilSense 原油风险智能预警系统",
+    "技术文档",
+    "OilSense_源代码",
+    ".env",
+)
+if os.path.exists(LEGACY_ENV_PATH):
+    load_dotenv(dotenv_path=LEGACY_ENV_PATH)
 
 st.set_page_config(
     page_title="OilSense | 原油风险智能预警系统",
@@ -384,14 +394,109 @@ OIL_COUNTRIES = {
     "阿尔及利亚":{"lat": 28.0, "lon":   2.0, "code": "AL", "prod":  0.9, "share":  0.9},
 }
 
-# 地缘政治重点事件（用于地球上的感叹号标注）
+# 地缘政治重点事件（人工维护，用于地球上的感叹号标注）
+# 自动新闻抽取噪音较高，地图层采用人工精选热点；需要更新时只改这里。
 GEO_EVENTS = [
-    {"lat": 32.0, "lon": 53.0, "label": "美伊紧张局势", "severity": "high"},
-    {"lat": 24.0, "lon": 45.0, "label": "OPEC+减产协议", "severity": "medium"},
-    {"lat": 61.0, "lon": 90.0, "label": "俄罗斯能源制裁", "severity": "high"},
-    {"lat": 31.5, "lon": 34.8, "label": "中东冲突外溢", "severity": "high"},
-    {"lat": 60.0, "lon": 10.0, "label": "北欧天然气供应", "severity": "low"},
+    {
+        "lat": 32.0, "lon": 53.0,
+        "label": "美伊冲突 / 霍尔木兹风险",
+        "severity": "high",
+        "updated": "2026-05-19",
+        "note": "当前黑天鹅模块的核心触发区域，影响中东原油出口与航运通道。",
+    },
+    {
+        "lat": 12.0, "lon": 43.0,
+        "label": "红海航运扰动",
+        "severity": "high",
+        "updated": "2026-05-19",
+        "note": "影响曼德海峡、苏伊士方向的油轮绕行与运费压力。",
+    },
+    {
+        "lat": 61.0, "lon": 90.0,
+        "label": "俄罗斯能源制裁",
+        "severity": "high",
+        "updated": "2026-05-19",
+        "note": "制裁、折价出口与结算链条仍影响全球原油贸易流向。",
+    },
+    {
+        "lat": 24.0, "lon": 45.0,
+        "label": "OPEC+供给政策",
+        "severity": "medium",
+        "updated": "2026-05-19",
+        "note": "产量配额、减产执行率与增产预期会影响中期供给判断。",
+    },
+    {
+        "lat": 8.0, "lon": -66.0,
+        "label": "委内瑞拉制裁与出口",
+        "severity": "medium",
+        "updated": "2026-05-19",
+        "note": "制裁豁免、出口恢复与政治风险会影响边际供应。",
+    },
 ]
+
+COUNTRY_KEYWORDS = {
+    "美国"    : ["United States", "U.S.", "US", "America", "American", "Washington", "Trump", "Biden", "shale", "Permian"],
+    "俄罗斯"  : ["Russia", "Russian", "Moscow", "Kremlin"],
+    "沙特阿拉伯": ["Saudi", "Saudi Arabia", "Riyadh", "Aramco"],
+    "伊拉克"  : ["Iraq", "Iraqi", "Baghdad", "Kirkuk", "Basra"],
+    "伊朗"    : ["Iran", "Iranian", "Tehran", "Hormuz"],
+    "阿联酋"  : ["UAE", "United Arab Emirates", "Dubai", "Abu Dhabi"],
+    "科威特"  : ["Kuwait", "Kuwaiti"],
+    "挪威"    : ["Norway", "Norwegian", "Equinor"],
+    "哈萨克斯坦": ["Kazakhstan", "Kazakh", "CPC pipeline"],
+    "尼日利亚": ["Nigeria", "Nigerian"],
+    "利比亚"  : ["Libya", "Libyan", "Tripoli"],
+    "委内瑞拉": ["Venezuela", "Venezuelan", "Maduro"],
+    "阿尔及利亚": ["Algeria", "Algerian", "Sonatrach"],
+}
+
+EVENT_TAGS = {
+    "封锁": ["blockade", "blocked", "closure", "closed", "shut", "Hormuz"],
+    "袭击": ["attack", "strike", "missile", "drone", "explosion", "sabotage"],
+    "制裁": ["sanction", "embargo", "tariff", "restriction"],
+    "冲突": ["war", "conflict", "clash", "tension", "escalation"],
+    "减产": ["production cut", "output cut", "OPEC+", "quota"],
+    "供应中断": ["disruption", "outage", "shutdown", "pipeline", "export halt"],
+    "航运风险": ["tanker", "shipping", "Red Sea", "Black Sea", "chokepoint"],
+}
+
+
+def load_country_production(base_countries):
+    """用本地 country_production.csv 覆盖页面里的静态产量基线。"""
+    countries = {k: v.copy() for k, v in base_countries.items()}
+    meta = {
+        "source": "页面内置基线",
+        "status": "静态基线",
+        "updated_at": "",
+    }
+    path = os.path.join(ROOT_DIR, "data", "raw", "country_production.csv")
+    if not os.path.exists(path):
+        return countries, meta
+
+    try:
+        df = pd.read_csv(path)
+        for _, row in df.iterrows():
+            name = str(row.get("country", ""))
+            if name not in countries:
+                continue
+            prod = pd.to_numeric(row.get("production_mbd"), errors="coerce")
+            share = pd.to_numeric(row.get("share_pct"), errors="coerce")
+            if pd.notna(prod):
+                countries[name]["prod"] = round(float(prod), 2)
+            if pd.notna(share):
+                countries[name]["share"] = round(float(share), 2)
+        if len(df) > 0:
+            meta = {
+                "source": str(df.get("source", pd.Series(["本地文件"])).iloc[0]),
+                "status": str(df.get("status", pd.Series(["本地缓存"])).iloc[0]),
+                "updated_at": str(df.get("updated_at", pd.Series([""])).iloc[0]),
+            }
+    except Exception:
+        pass
+    return countries, meta
+
+
+OIL_COUNTRIES, PRODUCTION_META = load_country_production(OIL_COUNTRIES)
 @st.cache_data(ttl=3600)
 def get_country_risk():
     try:
@@ -408,10 +513,14 @@ def auto_update_data():
         from update_daily import (
             update_oil_prices,
             update_macro_data,
+            update_country_production_data,
+            update_news_api,
             update_news_rss,      # RSS很快
         )
         update_oil_prices()       # FRED拉增量，通常0条，很快
         update_macro_data()       # 同上
+        update_country_production_data()
+        update_news_api()         # NewsAPI按主题与产油国补充
         update_news_rss()         # RSS抓取，约10秒
         return datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception as e:
@@ -604,27 +713,105 @@ def get_predictions():
 
 pred_df = get_predictions()
 
+
+def infer_extreme_start(feature_df):
+    """从咽喉点、波动率和地缘政治信号自动推断极端期起点。"""
+    if feature_df is None or len(feature_df) == 0:
+        return pd.Timestamp("2026-03-02"), "fallback"
+
+    test_start = feature_df.index[int(len(feature_df) * 0.8)]
+    df = feature_df.loc[test_start:].copy()
+    if len(df) == 0:
+        return pd.Timestamp("2026-03-02"), "fallback"
+
+    primary = pd.Series(False, index=df.index)
+    secondary = pd.Series(False, index=df.index)
+    reasons = []
+
+    def as_bool(condition):
+        return condition.reindex(df.index).fillna(False).astype(bool)
+
+    def first_sustained(condition):
+        clustered = condition.rolling(3, min_periods=1).sum() >= 2
+        candidates = clustered[clustered].index
+        if len(candidates) == 0:
+            candidates = condition[condition].index
+        return candidates
+
+    if "hormuz_blocked" in df.columns:
+        blocked = as_bool(df["hormuz_blocked"].fillna(0) > 0)
+        candidates = blocked[blocked].index
+        if len(candidates) > 0:
+            return pd.Timestamp(candidates[0]), "霍尔木兹封锁信号"
+
+    if "cp6_tanker" in df.columns:
+        cp6 = pd.to_numeric(df["cp6_tanker"], errors="coerce")
+        rolling_base = cp6.rolling(90, min_periods=20).mean().shift(1)
+        cp6_low = as_bool(cp6 < rolling_base * 0.55)
+        primary = primary | cp6_low
+        if cp6_low.any():
+            reasons.append("霍尔木兹油轮量低于历史基线")
+
+    if "hormuz_tanker_zscore" in df.columns:
+        zscore = as_bool(df["hormuz_tanker_zscore"].abs() > 2.0)
+        primary = primary | zscore
+        if zscore.any():
+            reasons.append("霍尔木兹航运异常")
+
+    if "gdelt_conflict_intensity" in df.columns:
+        gdelt = as_bool(pd.to_numeric(df["gdelt_conflict_intensity"], errors="coerce") < -6.0)
+        secondary = secondary | gdelt
+        if gdelt.any():
+            reasons.append("GDELT冲突强度异常")
+
+    if "VIX" in df.columns:
+        secondary = secondary | as_bool(pd.to_numeric(df["VIX"], errors="coerce") > 30)
+    if "vol_ratio" in df.columns:
+        secondary = secondary | as_bool(pd.to_numeric(df["vol_ratio"], errors="coerce") > 1.8)
+
+    trigger = primary & (secondary | primary.rolling(3, min_periods=1).sum().ge(2))
+    candidates = first_sustained(trigger)
+    if len(candidates) == 0 and primary.any():
+        candidates = first_sustained(primary)
+    if len(candidates) > 0:
+        return pd.Timestamp(candidates[0]), " / ".join(reasons[:3])
+
+    fallback = pd.Timestamp("2026-03-02")
+    if df.index.min() <= fallback <= df.index.max():
+        return fallback, "fallback"
+    return pd.Timestamp(df.index[int(len(df) * 0.8)]), "fallback"
+
+
+bs_start, bs_start_reason = infer_extreme_start(feat)
+
+
 @st.cache_data
 def get_current_prediction():
     latest_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
     try:
         if os.path.exists(latest_path):
             latest = pd.read_csv(latest_path, index_col=0, parse_dates=True).tail(1)
+            low = float(models["enhanced_low"].predict(latest[model_feature_map["enhanced_low"]])[0])
+            mid = float(models["baseline_mid"].predict(latest[model_feature_map["baseline_mid"]])[0])
+            high = float(models["enhanced_high"].predict(latest[model_feature_map["enhanced_high"]])[0])
             return (
-                float(models["enhanced_low"].predict(latest[model_feature_map["enhanced_low"]])[0]),
-                float(models["enhanced_mid"].predict(latest[model_feature_map["enhanced_mid"]])[0]),
-                float(models["enhanced_high"].predict(latest[model_feature_map["enhanced_high"]])[0]),
+                min(low, mid),
+                mid,
+                max(high, mid),
                 str(latest.index[-1].date()),
-                "Latest features (Enhanced XGBoost)",
+                "Hybrid XGBoost（Baseline P50 + Enhanced区间）",
             )
     except Exception:
         pass
+    low = float(pred_df["pred_enhanced_low"].iloc[-1])
+    mid = float(pred_df["pred_baseline_mid"].iloc[-1])
+    high = float(pred_df["pred_enhanced_high"].iloc[-1])
     return (
-        float(pred_df["pred_enhanced_low"].iloc[-1]),
-        float(pred_df["pred_enhanced_mid"].iloc[-1]),
-        float(pred_df["pred_enhanced_high"].iloc[-1]),
+        min(low, mid),
+        mid,
+        max(high, mid),
         str(pred_df.index[-1].date()),
-        "Feature matrix (Enhanced XGBoost)",
+        "Feature matrix Hybrid XGBoost",
     )
 
 
@@ -646,38 +833,35 @@ def get_risk_level(low, mid, high):
 
 def get_country_news(country_name, n=5):
     """从情感分析结果里提取该国相关新闻，带情感标签"""
-    # 优先读情感分析结果
     sentiment_path = os.path.join(ROOT_DIR, "data", "processed", "news_sentiment_detail.csv")
     news_path      = os.path.join(ROOT_DIR, "data", "raw", "news_data.csv")
 
+    frames = []
     if os.path.exists(sentiment_path):
-        df = pd.read_csv(sentiment_path)
-    elif os.path.exists(news_path):
-        df = pd.read_csv(news_path)
-    else:
+        frames.append(pd.read_csv(sentiment_path))
+    if os.path.exists(news_path):
+        raw_news = pd.read_csv(news_path)
+        frames.append(raw_news)
+    if not frames:
         return []
 
+    df = pd.concat(frames, ignore_index=True, sort=False)
     if len(df) == 0:
         return []
+    df = df.drop_duplicates(subset=["title"], keep="first")
 
-    keywords = {
-        "伊朗"    : ["Iran", "Iranian"],
-        "沙特阿拉伯": ["Saudi", "Riyadh", "Aramco"],
-        "俄罗斯"  : ["Russia", "Russian", "Moscow", "Kremlin"],
-        "伊拉克"  : ["Iraq", "Iraqi", "Baghdad"],
-        "美国"    : ["US", "America", "Washington", "Biden", "Trump"],
-        "阿联酋"  : ["UAE", "Dubai", "Abu Dhabi"],
-        "挪威"    : ["Norway", "Norwegian", "Equinor"],
-        "委内瑞拉": ["Venezuela", "Maduro"],
-        "利比亚"  : ["Libya", "Libyan"],
-        "尼日利亚": ["Nigeria", "Nigerian"],
-        "科威特"  : ["Kuwait"],
-        "哈萨克斯坦": ["Kazakhstan"],
-        "阿尔及利亚": ["Algeria"],
-    }
+    kws = COUNTRY_KEYWORDS.get(country_name, [country_name])
+    pattern = "|".join(re.escape(k) for k in kws)
+    text = (
+        df.get("title", pd.Series("", index=df.index)).fillna("").astype(str) + " " +
+        df.get("description", pd.Series("", index=df.index)).fillna("").astype(str)
+    )
+    mask = text.str.contains(pattern, case=False, na=False, regex=True)
+    if "country_focus" in df.columns:
+        focus = df["country_focus"].fillna("").astype(str)
+        mask = mask | focus.str.contains(re.escape(country_name), case=False, na=False, regex=True)
 
-    kws  = keywords.get(country_name, [country_name])
-    mask = df["title"].str.contains("|".join(kws), case=False, na=False)
+    df["date"] = pd.to_datetime(df.get("date", ""), errors="coerce")
     filtered = df[mask].sort_values("date", ascending=False).head(n)
 
     results = []
@@ -695,6 +879,106 @@ def get_country_news(country_name, n=5):
             "reason"         : str(row.get("reason", "")) if "reason" in row else "",
         })
     return results
+
+
+@st.cache_data(ttl=1800)
+def get_dynamic_geo_events(max_events=6, days=7):
+    """从最近新闻中抽取地图上的地缘政治事件标签。"""
+    if news is None or len(news) == 0:
+        return GEO_EVENTS
+
+    df = news.copy()
+    if "date" not in df.columns or "title" not in df.columns:
+        return GEO_EVENTS
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date", "title"])
+    if len(df) == 0:
+        return GEO_EVENTS
+
+    end_date = df["date"].max()
+    recent_news = df[df["date"] >= end_date - pd.Timedelta(days=days)]
+    events = []
+
+    for _, row in recent_news.iterrows():
+        title = str(row.get("title", ""))
+        desc = str(row.get("description", ""))
+        text = f"{title} {desc}"
+        text_l = text.lower()
+
+        country = None
+        focus = str(row.get("country_focus", "") or "")
+        for cname in focus.split(";"):
+            if cname in OIL_COUNTRIES:
+                country = cname
+                break
+        if country is None:
+            for cname, kws in COUNTRY_KEYWORDS.items():
+                if any(re.search(r"\b" + re.escape(kw.lower()) + r"\b", text_l) for kw in kws):
+                    country = cname
+                    break
+        if country not in OIL_COUNTRIES:
+            continue
+
+        matched_tags = []
+        score = 0
+        for tag, kws in EVENT_TAGS.items():
+            if any(kw.lower() in text_l for kw in kws):
+                matched_tags.append(tag)
+                score += 2 if tag in ["封锁", "袭击", "制裁", "冲突"] else 1
+        if score == 0:
+            continue
+
+        severity = "high" if score >= 4 else "medium" if score >= 2 else "low"
+        label = f"{country}：" + " / ".join(matched_tags[:2])
+        info = OIL_COUNTRIES[country]
+        events.append({
+            "lat": info["lat"],
+            "lon": info["lon"],
+            "label": label,
+            "severity": severity,
+            "title": title,
+            "source": str(row.get("source", "")),
+            "date": str(row.get("date", ""))[:10],
+            "score": score,
+        })
+
+    if not events:
+        for _, row in recent_news.iterrows():
+            focus = str(row.get("country_focus", "") or "")
+            country = next((c for c in focus.split(";") if c in OIL_COUNTRIES), None)
+            if country is None:
+                continue
+            title = str(row.get("title", ""))
+            if not title:
+                continue
+            text_l = title.lower()
+            severity = "medium" if any(k in text_l for k in ["war", "strike", "sanction", "hormuz", "attack"]) else "low"
+            info = OIL_COUNTRIES[country]
+            events.append({
+                "lat": info["lat"],
+                "lon": info["lon"],
+                "label": f"{country}：新闻关注",
+                "severity": severity,
+                "title": title,
+                "source": str(row.get("source", "")),
+                "date": str(row.get("date", ""))[:10],
+                "score": 1,
+            })
+        if not events:
+            return GEO_EVENTS
+
+    events = sorted(events, key=lambda x: (x["score"], x["date"]), reverse=True)
+    deduped = []
+    seen = set()
+    for event in events:
+        key = (event["lat"], event["lon"], event["label"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+        if len(deduped) >= max_events:
+            break
+    return deduped
 
 
 with st.sidebar:
@@ -765,7 +1049,10 @@ try:
     vol_ratio  = float(_latest.get("vol_ratio", 1))
     vix        = float(_latest.get("VIX", 20))
 
-    extreme_result = get_extreme_prediction(_latest, last_low, last_mid, last_high)
+    extreme_result = get_extreme_prediction(
+        _latest, last_low, last_mid, last_high,
+        force_activate=is_black_swan
+    )
 
     if extreme_result["activated"] or is_black_swan:
         extreme_active = True
@@ -941,7 +1228,13 @@ if page == "全球能源地图":
 
     # 地缘政治事件感叹号标注
     event_colors = {"high": "#e74c3c", "medium": "#f1c40f", "low": "#2ecc71"}
-    for event in GEO_EVENTS:
+    geo_events = GEO_EVENTS
+    for event in geo_events:
+        hover_label = (
+            f"{event.get('label', '')}<br>"
+            f"更新：{event.get('updated', '')}<br>"
+            f"{event.get('note', '')}"
+        )
         fig.add_trace(go.Scattergeo(
             lat=[event["lat"]],
             lon=[event["lon"]],
@@ -955,7 +1248,7 @@ if page == "全球能源地图":
             ),
             textfont=dict(size=8, color=event_colors[event["severity"]]),
             textposition="top center",
-            hovertext=event["label"],
+            hovertext=hover_label,
             hoverinfo="text",
             name=event["label"],
             showlegend=False,
@@ -1082,7 +1375,7 @@ if page == "全球能源地图":
         st.caption(low_names)
     with col4:
         st.markdown("⚠ **地缘政治热点**")
-        st.caption("当前活跃冲突/制裁/协议区域")
+        st.caption("人工精选热点清单，按新闻与项目情景及时维护")
 
     st.divider()
 
@@ -1234,6 +1527,11 @@ if page == "全球能源地图":
 
     # ── 全球产量分布饼图 ───────────────────────────────────────────────────
     st.subheader("全球原油产量分布")
+    st.caption(
+        "产量数据：" + PRODUCTION_META.get("status", "静态基线") +
+        " · 更新时间：" + str(PRODUCTION_META.get("updated_at", "") or "未知") +
+        " · 未配置官方 EIA Key 时为本地基线，不代表实时官方月度值"
+    )
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -1753,9 +2051,9 @@ elif page == "风险预测":
             name="WTI 实际价格", line=dict(color="#3498db", width=2)
         ))
         fig_wti.add_vline(
-            x=pd.Timestamp("2026-03-02").timestamp() * 1000,
+            x=bs_start,
             line_dash="dash", line_color="#e74c3c",
-            annotation_text="霍尔木兹封锁", annotation_font_color="#e74c3c",
+            annotation_text="自动极端期起点", annotation_font_color="#e74c3c",
         )
         fig_wti.update_layout(
             height=300, margin=dict(l=0, r=0, t=10, b=0),
@@ -1840,7 +2138,10 @@ elif page == "风险预测":
 
     # ── 近60日预测区间走势 ────────────────────────────────────────────
     st.subheader("近60日预测区间走势")
-    st.caption("红色阴影区域为黑天鹅事件期间，统计模型预测仅供参考")
+    st.caption(
+        "红色阴影区域为自动识别的极端事件期间，统计模型预测仅供参考；"
+        f"当前起点：{bs_start.date()}（{bs_start_reason}）"
+    )
 
     recent = pred_df.tail(60)
     fig    = go.Figure()
@@ -1851,12 +2152,12 @@ elif page == "风险预测":
         line=dict(color="rgba(0,0,0,0)"), name="风险区间 P10~P90"
     ))
     fig.add_trace(go.Scatter(
-        x=recent.index, y=recent["pred_enhanced_mid"],
-        name="Enhanced预测（P50）", line=dict(color="#3498db", width=2)
+        x=recent.index, y=recent["pred_baseline_mid"],
+        name="主预测（Baseline P50）", line=dict(color="#3498db", width=2)
     ))
     fig.add_trace(go.Scatter(
-        x=recent.index, y=recent["pred_baseline_mid"],
-        name="Baseline预测（P50）", line=dict(color="#95a5a6", width=1.5, dash="dash")
+        x=recent.index, y=recent["pred_enhanced_mid"],
+        name="Enhanced参考（P50）", line=dict(color="#95a5a6", width=1.5, dash="dash")
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["target"],
@@ -1864,7 +2165,7 @@ elif page == "风险预测":
     ))
     fig.add_hline(y=0, line_dash="solid", line_color="rgba(255,255,255,0.3)", line_width=1)
     fig.add_vrect(
-        x0="2026-03-02", x1=str(recent.index[-1].date()),
+        x0=bs_start, x1=str(recent.index[-1].date()),
         fillcolor="rgba(231,76,60,0.08)", line_width=0,
         annotation_text="黑天鹅期间", annotation_position="top left",
         annotation_font_color="#e74c3c",
@@ -1892,11 +2193,11 @@ elif page == "风险预测":
     actual     = test_df["target"]
 
     # 黑天鹅期间（极端情景模型负责）
-    BS_START = pd.Timestamp("2026-03-02")
+    BS_START = bs_start
     normal_df  = test_df[test_df.index < BS_START]
     extreme_df = test_df[test_df.index >= BS_START]
 
-    # 正常期间：XGBoost Enhanced 准确率
+    # 正常期间：Baseline 负责方向预测，Enhanced 负责风险区间
     perf = {}
     for version in ["enhanced", "baseline"]:
         mid   = normal_df[f"pred_{version}_mid"]
@@ -1907,7 +2208,9 @@ elif page == "风险预测":
 
     # 极端期间：用情景匹配模型的方向（weighted_return_10d 的符号 vs 实际）
     extreme_acc = None
-    if len(extreme_df) > 0 and extreme_result is not None and extreme_result.get("activated"):
+    if len(extreme_df) > 0 and extreme_result is not None and (
+        extreme_result.get("activated") or is_black_swan
+    ):
         pred_dir  = np.sign(extreme_result.get("weighted_return_10d", 0))
         act_ext   = extreme_df["target"].dropna()
         if len(act_ext) > 0:
@@ -1921,18 +2224,18 @@ elif page == "风险预测":
     n_total   = n_normal + n_extreme
     if extreme_acc is not None and n_total > 0:
         hybrid_acc = round(
-            (perf["enhanced"] * n_normal + extreme_acc * n_extreme) / n_total, 2
+            (perf["baseline"] * n_normal + extreme_acc * n_extreme) / n_total, 2
         )
     else:
-        hybrid_acc = perf["enhanced"]
+        hybrid_acc = perf["baseline"]
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("综合准确率（双模型）", f"{hybrid_acc}%",
                   f"+{round(hybrid_acc-50,2)}% vs 随机基准")
     with col2:
-        st.metric("Enhanced 准确率（正常期）", f"{perf['enhanced']}%",
-                  f"+{round(perf['enhanced']-50,2)}%")
+        st.metric("Baseline 准确率（正常期）", f"{perf['baseline']}%",
+                  f"+{round(perf['baseline']-50,2)}%")
     with col3:
         if extreme_acc is not None:
             st.metric("情景匹配准确率（极端期）", f"{extreme_acc}%",
@@ -1944,7 +2247,7 @@ elif page == "风险预测":
         st.metric("测试集样本数", f"{len(test_df)} 条",
                   f"正常{n_normal}条 极端{n_extreme}条")
 
-    st.caption("💡 正常市场由 Enhanced XGBoost 负责，极端事件期间自动切换至历史情景匹配模型")
+    st.caption("💡 正常市场方向由 Baseline XGBoost 负责，风险区间由 Enhanced/GDELT/PortWatch 负责，极端事件期间自动切换至历史情景匹配模型")
 
     st.divider()
 
@@ -2019,14 +2322,14 @@ elif page == "历史回测":
     ), row=2, col=1)
 
     fig.add_trace(go.Scatter(
-        x=filtered.index, y=filtered["pred_enhanced_mid"],
-        name="预测中位数（Enhanced）",
+        x=filtered.index, y=filtered["pred_baseline_mid"],
+        name="主预测中位数（Baseline）",
         line=dict(color="#3498db", width=1.5)
     ), row=2, col=1)
 
     fig.add_trace(go.Scatter(
-        x=filtered.index, y=filtered["pred_baseline_mid"],
-        name="预测中位数（Baseline）",
+        x=filtered.index, y=filtered["pred_enhanced_mid"],
+        name="参考中位数（Enhanced）",
         line=dict(color="#95a5a6", width=1, dash="dash")
     ), row=2, col=1)
 
@@ -2162,8 +2465,12 @@ elif page == "历史回测":
         line=dict(color="rgba(0,0,0,0)"), name="风险区间"
     ))
     fig3.add_trace(go.Scatter(
+        x=ev_data.index, y=ev_data["pred_baseline_mid"],
+        name="主预测中位数（Baseline）", line=dict(color="#3498db", width=2)
+    ))
+    fig3.add_trace(go.Scatter(
         x=ev_data.index, y=ev_data["pred_enhanced_mid"],
-        name="预测中位数", line=dict(color="#3498db", width=2)
+        name="Enhanced参考中位数", line=dict(color="#95a5a6", width=1.5, dash="dash")
     ))
     fig3.add_trace(go.Scatter(
         x=ev_data.index, y=ev_data["target"],
