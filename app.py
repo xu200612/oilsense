@@ -509,18 +509,16 @@ def get_country_risk():
 
 @st.cache_data(ttl=86400)
 def auto_update_data():
+    if os.getenv("ENABLE_APP_AUTO_UPDATE", "0") != "1":
+        return "使用仓库内已更新数据"
     try:
         from update_daily import (
             update_oil_prices,
             update_macro_data,
-            update_country_production_data,
-            update_news_api,
             update_news_rss,      # RSS很快
         )
         update_oil_prices()       # FRED拉增量，通常0条，很快
         update_macro_data()       # 同上
-        update_country_production_data()
-        update_news_api()         # NewsAPI按主题与产油国补充
         update_news_rss()         # RSS抓取，约10秒
         return datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception as e:
@@ -612,7 +610,7 @@ def get_chokepoint_status():
             continue
 
         # PortWatch基础数据
-        pw_latest   = int(series.iloc[-1])
+        pw_latest   = int(round(safe_float(series.iloc[-1], 0.0)))
         avg_90d     = series.tail(90).mean()
         pw_ratio    = pw_latest / avg_90d if avg_90d > 0 else 1.0
         last_date   = str(series.index[-1].date())
@@ -785,15 +783,94 @@ def infer_extreme_start(feature_df):
 bs_start, bs_start_reason = infer_extreme_start(feat)
 
 
+def safe_float(value, default=0.0, min_value=None, max_value=None):
+    """Convert display-layer values safely; protects Streamlit pages from NaN/blank CSV cells."""
+    try:
+        val = pd.to_numeric(value, errors="coerce")
+        if pd.isna(val):
+            return default
+        val = float(val)
+        if not np.isfinite(val):
+            return default
+        if min_value is not None:
+            val = max(min_value, val)
+        if max_value is not None:
+            val = min(max_value, val)
+        return val
+    except Exception:
+        return default
+
+
+def safe_pct_width(value):
+    return int(round(abs(safe_float(value, 0.0, -1.0, 1.0)) * 100))
+
+
+def add_vertical_marker(fig, x, text="", color="#e74c3c", dash="dash"):
+    """Avoid Plotly add_vline annotation errors with pandas Timestamp values."""
+    x = pd.Timestamp(x).to_pydatetime()
+    fig.add_shape(
+        type="line",
+        x0=x,
+        x1=x,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref="paper",
+        line=dict(color=color, width=1.5, dash=dash),
+    )
+    if text:
+        fig.add_annotation(
+            x=x,
+            y=1,
+            xref="x",
+            yref="paper",
+            text=text,
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(color=color, size=10),
+        )
+
+
+def add_vertical_band(fig, x0, x1, text="", color="rgba(231,76,60,0.08)", font_color="#e74c3c"):
+    x0 = pd.Timestamp(x0).to_pydatetime()
+    x1 = pd.Timestamp(x1).to_pydatetime()
+    if x0 > x1:
+        x0, x1 = x1, x0
+    fig.add_shape(
+        type="rect",
+        x0=x0,
+        x1=x1,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref="paper",
+        fillcolor=color,
+        line=dict(width=0),
+        layer="below",
+    )
+    if text:
+        fig.add_annotation(
+            x=x0,
+            y=1,
+            xref="x",
+            yref="paper",
+            text=text,
+            showarrow=False,
+            xanchor="left",
+            yanchor="top",
+            font=dict(color=font_color, size=10),
+        )
+
+
 @st.cache_data
 def get_current_prediction():
     latest_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
     try:
         if os.path.exists(latest_path):
             latest = pd.read_csv(latest_path, index_col=0, parse_dates=True).tail(1)
-            low = float(models["enhanced_low"].predict(latest[model_feature_map["enhanced_low"]])[0])
-            mid = float(models["baseline_mid"].predict(latest[model_feature_map["baseline_mid"]])[0])
-            high = float(models["enhanced_high"].predict(latest[model_feature_map["enhanced_high"]])[0])
+            low = safe_float(models["enhanced_low"].predict(latest[model_feature_map["enhanced_low"]])[0], 0.0)
+            mid = safe_float(models["baseline_mid"].predict(latest[model_feature_map["baseline_mid"]])[0], 0.0)
+            high = safe_float(models["enhanced_high"].predict(latest[model_feature_map["enhanced_high"]])[0], 0.0)
             return (
                 min(low, mid),
                 mid,
@@ -803,9 +880,9 @@ def get_current_prediction():
             )
     except Exception:
         pass
-    low = float(pred_df["pred_enhanced_low"].iloc[-1])
-    mid = float(pred_df["pred_baseline_mid"].iloc[-1])
-    high = float(pred_df["pred_enhanced_high"].iloc[-1])
+    low = safe_float(pred_df["pred_enhanced_low"].iloc[-1], 0.0)
+    mid = safe_float(pred_df["pred_baseline_mid"].iloc[-1], 0.0)
+    high = safe_float(pred_df["pred_enhanced_high"].iloc[-1], 0.0)
     return (
         min(low, mid),
         mid,
@@ -819,6 +896,9 @@ current_low, current_mid, current_high, current_pred_date, current_model_mode = 
 
 
 def get_risk_level(low, mid, high):
+    low = safe_float(low, 0.0)
+    mid = safe_float(mid, 0.0)
+    high = safe_float(high, 0.0)
     spread = high - low
     if spread > 0.15:
         return "极高风险", "#e74c3c", 5
@@ -872,8 +952,8 @@ def get_country_news(country_name, n=5):
             "source"         : str(row.get("source", "")),
             "url"            : str(row.get("url", "")),
             "sentiment"      : str(row.get("sentiment", "neutral")),
-            "score"          : float(row.get("score", 0)) if "score" in row else 0.0,
-            "confidence"     : float(row.get("confidence", 0)) if "confidence" in row else 0.0,
+            "score"          : safe_float(row.get("score", 0), 0.0, -1.0, 1.0),
+            "confidence"     : safe_float(row.get("confidence", 0), 0.0, 0.0, 1.0),
             "event_type"     : str(row.get("event_type", "other")) if "event_type" in row else "other",
             "impact_duration": str(row.get("impact_duration", "short")) if "impact_duration" in row else "short",
             "reason"         : str(row.get("reason", "")) if "reason" in row else "",
@@ -1046,8 +1126,8 @@ try:
     from extreme_scenario import get_extreme_prediction
     _feat_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
     _latest    = pd.read_csv(_feat_path, index_col=0, parse_dates=True).iloc[-1]
-    vol_ratio  = float(_latest.get("vol_ratio", 1))
-    vix        = float(_latest.get("VIX", 20))
+    vol_ratio  = safe_float(_latest.get("vol_ratio", 1), 1.0)
+    vix        = safe_float(_latest.get("VIX", 20), 20.0)
 
     extreme_result = get_extreme_prediction(
         _latest, last_low, last_mid, last_high,
@@ -1065,8 +1145,8 @@ try:
         trigger_type   = extreme_result.get("trigger_type", "geopolitics")
 
         # 霍尔木兹封锁强制修正方向
-        _hormuz_z = float(_latest.get("hormuz_tanker_zscore", 0))
-        _cp6      = float(_latest.get("cp6_tanker", 999))
+        _hormuz_z = safe_float(_latest.get("hormuz_tanker_zscore", 0), 0.0)
+        _cp6      = safe_float(_latest.get("cp6_tanker", 999), 999.0)
         if is_black_swan and (abs(_hormuz_z) > 1.5 or _cp6 < 5):
             last_mid  = abs(last_mid)  if last_mid  < 0 else last_mid
             last_high = abs(last_high) if last_high < 0 else last_high
@@ -1079,6 +1159,12 @@ except Exception:
         model_mode = "极端事件放大模式（降级）"
 
 rt_price, rt_date, rt_live = get_realtime_price()
+rt_price = safe_float(rt_price, safe_float(feat["WTI"].dropna().iloc[-1], 0.0) if "WTI" in feat.columns and len(feat["WTI"].dropna()) else 0.0)
+last_low = safe_float(last_low, 0.0)
+last_mid = safe_float(last_mid, 0.0)
+last_high = safe_float(last_high, 0.0)
+if last_low > last_high:
+    last_low, last_high = last_high, last_low
 
 if is_black_swan:
     triggers_text = " ｜ ".join(bs_signals.get("triggers", []))
@@ -1448,8 +1534,8 @@ if page == "全球能源地图":
         for item in country_news:
             sent = item.get("sentiment", "neutral")
             cfg = SENTIMENT_CFG.get(sent, SENTIMENT_CFG["neutral"])
-            score = item.get("score", 0.0)
-            conf = item.get("confidence", 0.0)
+            score = safe_float(item.get("score", 0.0), 0.0, -1.0, 1.0)
+            conf = safe_float(item.get("confidence", 0.0), 0.0, 0.0, 1.0)
             etype = EVENT_LABEL.get(item.get("event_type", "other"), "其他")
             duration = DURATION_LABEL.get(item.get("impact_duration", "short"), "短期")
             reason = item.get("reason", "")
@@ -1459,7 +1545,7 @@ if page == "全球能源地图":
             source = item.get("source", "")
 
             # 评分条宽度
-            bar_width = int(abs(score) * 100)
+            bar_width = safe_pct_width(score)
             bar_color = cfg["color"]
 
             title_html = (
@@ -1506,7 +1592,7 @@ if page == "全球能源地图":
                     "border-radius:4px;\"></div>"
                     "</div>"
                     f"<div style=\"color:#555;font-size:9px;margin-top:2px;\">"
-                    f"影响强度 {score:+.2f} · 置信度 {int(conf * 100)}%</div>"
+                    f"影响强度 {score:+.2f} · 置信度 {safe_pct_width(conf)}%</div>"
                     "</div>"
 
                     # 分析原因
@@ -1615,8 +1701,8 @@ elif page == "市场概览":
         if len(sentiment) > 0:
             latest_sent = sentiment.sort_values("date").iloc[-1]
             st.metric("最新情绪评分",
-                      str(round(latest_sent["sentiment_score"], 3)),
-                      "新闻数：" + str(int(latest_sent["news_count"])))
+                      str(round(safe_float(latest_sent.get("sentiment_score", 0.0), 0.0), 3)),
+                      "新闻数：" + str(int(round(safe_float(latest_sent.get("news_count", 0), 0.0)))))
         else:
             st.metric("最新情绪评分", "N/A")
 
@@ -1654,14 +1740,7 @@ elif page == "市场概览":
         ))
         # 数据延迟分界线
         last_data_date = pred_df.index[-1]
-        fig.add_vline(
-            x=last_data_date.timestamp() * 1000,
-            line_dash="dash",
-            line_color="#666",
-            annotation_text="数据截止",
-            annotation_font_color="#666",
-            annotation_font_size=10,
-        )
+        add_vertical_marker(fig, last_data_date, text="数据截止", color="#666")
         fig.update_layout(
             height=320,
             margin=dict(l=0, r=0, t=10, b=0),
@@ -1739,11 +1818,11 @@ elif page == "市场概览":
             if has_sentiment:
                 sent = str(row.get("sentiment", "neutral"))
                 cfg = SENTIMENT_CFG.get(sent, SENTIMENT_CFG["neutral"])
-                score = float(row.get("score", 0)) if pd.notna(row.get("score")) else 0.0
-                conf = float(row.get("confidence", 0)) if pd.notna(row.get("confidence")) else 0.0
+                score = safe_float(row.get("score", 0), 0.0, -1.0, 1.0)
+                conf = safe_float(row.get("confidence", 0), 0.0, 0.0, 1.0)
                 etype = EVENT_LABEL.get(str(row.get("event_type", "other")), "其他")
                 reason = str(row.get("reason", ""))
-                bar_w = int(abs(score) * 100)
+                bar_w = safe_pct_width(score)
             else:
                 cfg = SENTIMENT_CFG["neutral"]
                 score = 0.0
@@ -1805,7 +1884,7 @@ elif page == "市场概览":
                         f'<div style="background:{cfg["bar"]};width:{bar_w}%;'
                         f'height:3px;border-radius:3px;"></div></div>'
                         f'<div style="color:#444;font-size:9px;">'
-                        f'影响强度 {score:+.2f} · 置信度 {int(conf * 100)}%</div>'
+                        f'影响强度 {score:+.2f} · 置信度 {safe_pct_width(conf)}%</div>'
                         if has_sentiment and bar_w > 0 else ""
                     ) +
 
@@ -1953,11 +2032,12 @@ elif page == "风险预测":
         # 高端 = 当前价 × (1 + 情景涨跌幅 × 1.3)
         scenarios = {}
         for i, (label, val) in enumerate(zip(labels, vals)):
+            val = safe_float(val, 0.0)
             low  = round(rt_price * (1 + val * 0.7), 1)
             high = round(rt_price * (1 + val * 1.3), 1)
             if low > high:
                 low, high = high, low
-            scenarios[label] = {"low": low, "high": high, "color": colors[i]}
+            scenarios[label] = {"low": low, "high": high, "color": colors[i % len(colors)]}
         fig_bs = go.Figure()
         fig_bs.add_hline(
             y=rt_price, line_dash="dash", line_color="white", line_width=2,
@@ -2007,11 +2087,11 @@ elif page == "风险预测":
                 sev_color = SEVERITY_COLOR.get(ev.get("severity", "moderate"), "#f1c40f")
                 sev_label = SEVERITY_LABEL.get(ev.get("severity", "moderate"), "中等")
                 tri_label = TRIGGER_LABEL.get(ev.get("trigger", ""), ev.get("trigger", ""))
-                ret_10d   = ev.get("actual_return")
-                ret_30d   = ev.get("return_30d") or ev.get("typical_30d")
-                ret_10d_str = f"{ret_10d*100:+.1f}%" if ret_10d is not None else "N/A"
-                ret_30d_str = f"{ret_30d*100:+.1f}%" if ret_30d is not None else "N/A"
-                sim_pct     = int(ev.get("similarity", 0) * 100)
+                ret_10d   = safe_float(ev.get("actual_return"), np.nan)
+                ret_30d   = safe_float(ev.get("return_30d", ev.get("typical_30d")), np.nan)
+                ret_10d_str = f"{ret_10d*100:+.1f}%" if np.isfinite(ret_10d) else "N/A"
+                ret_30d_str = f"{ret_30d*100:+.1f}%" if np.isfinite(ret_30d) else "N/A"
+                sim_pct     = int(round(safe_float(ev.get("similarity", 0), 0.0, 0.0, 1.0) * 100))
 
                 st.markdown(
                     f"<div style='background:rgba(255,255,255,0.04);border-left:3px solid {sev_color};"
@@ -2050,11 +2130,7 @@ elif page == "风险预测":
             x=recent_bs.index, y=recent_bs["WTI"],
             name="WTI 实际价格", line=dict(color="#3498db", width=2)
         ))
-        fig_wti.add_vline(
-            x=bs_start,
-            line_dash="dash", line_color="#e74c3c",
-            annotation_text="自动极端期起点", annotation_font_color="#e74c3c",
-        )
+        add_vertical_marker(fig_wti, bs_start, text="自动极端期起点", color="#e74c3c")
         fig_wti.update_layout(
             height=300, margin=dict(l=0, r=0, t=10, b=0),
             plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
@@ -2164,12 +2240,7 @@ elif page == "风险预测":
         name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5), opacity=0.8
     ))
     fig.add_hline(y=0, line_dash="solid", line_color="rgba(255,255,255,0.3)", line_width=1)
-    fig.add_vrect(
-        x0=bs_start, x1=str(recent.index[-1].date()),
-        fillcolor="rgba(231,76,60,0.08)", line_width=0,
-        annotation_text="黑天鹅期间", annotation_position="top left",
-        annotation_font_color="#e74c3c",
-    )
+    add_vertical_band(fig, bs_start, recent.index[-1], text="黑天鹅期间")
     fig.update_layout(
         height=420, margin=dict(l=0, r=0, t=10, b=0),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
@@ -2211,7 +2282,7 @@ elif page == "风险预测":
     if len(extreme_df) > 0 and extreme_result is not None and (
         extreme_result.get("activated") or is_black_swan
     ):
-        pred_dir  = np.sign(extreme_result.get("weighted_return_10d", 0))
+        pred_dir  = np.sign(safe_float(extreme_result.get("weighted_return_10d", 0), 0.0))
         act_ext   = extreme_df["target"].dropna()
         if len(act_ext) > 0:
             extreme_acc = round(
@@ -2267,7 +2338,7 @@ elif page == "风险预测":
         y=top_imp["feature"][::-1].values,
         orientation="h",
         marker_color=bar_colors[::-1],
-        text=[str(round(v, 4)) for v in top_imp["importance"][::-1].values],
+        text=[str(round(safe_float(v, 0.0), 4)) for v in top_imp["importance"][::-1].values],
         textposition="outside",
     ))
     fig2.update_layout(
@@ -2343,15 +2414,7 @@ elif page == "历史回测":
     for event in CRISIS_EVENTS:
         edate = pd.Timestamp(event["date"])
         if pd.Timestamp(start_date) <= edate <= pd.Timestamp(end_date):
-            fig.add_vline(
-                x=edate.timestamp() * 1000,
-                line_dash="dash",
-                line_color=event["color"], line_width=1.5,
-                annotation_text=event["label"],
-                annotation_position="top",
-                annotation_font_size=10,
-                annotation_font_color=event["color"]
-            )
+            add_vertical_marker(fig, edate, text=event["label"], color=event["color"])
 
     fig.update_layout(
         height=620, margin=dict(l=0, r=0, t=30, b=0),
@@ -2476,11 +2539,7 @@ elif page == "历史回测":
         x=ev_data.index, y=ev_data["target"],
         name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5)
     ))
-    fig3.add_vline(
-        x=pd.Timestamp(ev_date).timestamp() * 1000,
-        line_dash="dash",
-        line_color=ev_color, line_width=2
-    )
+    add_vertical_marker(fig3, pd.Timestamp(ev_date), color=ev_color)
     fig3.add_hline(y=0, line_color="white", line_width=0.8)
     fig3.update_layout(
         height=350, margin=dict(l=0, r=0, t=10, b=0),
