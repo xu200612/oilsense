@@ -3,7 +3,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from xgboost import XGBRegressor
+from xgboost import XGBClassifier, XGBRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -235,6 +235,22 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
     models["baseline_mid"] = (baseline_mid, baseline_feature_cols)
     print("  Baseline mid ✓  (迭代: " + str(baseline_mid.best_iteration) + ")")
 
+    direction_y_tr = (y_tr > 0).astype(int)
+    direction_y_val = (y_val > 0).astype(int)
+    direction_classifier = XGBClassifier(
+        n_estimators=300, max_depth=2, learning_rate=0.03,
+        subsample=0.7, colsample_bytree=0.7, min_child_weight=3,
+        objective="binary:logistic", eval_metric="logloss",
+        random_state=7, early_stopping_rounds=50
+    )
+    direction_classifier.fit(
+        X_tr[baseline_feature_cols], direction_y_tr,
+        eval_set=[(X_val[baseline_feature_cols], direction_y_val)],
+        verbose=False
+    )
+    models["_direction_classifier"] = (direction_classifier, baseline_feature_cols)
+    print("  Baseline direction classifier ✓  (迭代: " + str(direction_classifier.best_iteration) + ")")
+
     # ── Enhanced ───────────────────────────────────────────────────────────
     for quantile, label in [(0.1, "low"), (0.9, "high")]:
         model = XGBRegressor(
@@ -274,12 +290,16 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
     bm, bcols  = models["baseline_mid"]
     yb_pred    = bm.predict(X_test[bcols])
     baseline_acc = np.mean(np.sign(yb_pred) == np.sign(y_test))
+    dc, dcols = models["_direction_classifier"]
+    yd_pred = np.where(dc.predict_proba(X_test[dcols])[:, 1] >= 0.5, 1, -1)
+    direction_clf_acc = np.mean(yd_pred == np.sign(y_test))
 
     print("  ── 模型评估（10日预测窗口）──")
     print("  RMSE                  : " + str(round(rmse, 4)))
     print("  MAE                   : " + str(round(mae, 4)))
     print("  Enhanced 方向准确率    : " + str(round(direction_acc * 100, 2)) + "%")
     print("  Baseline 方向准确率    : " + str(round(baseline_acc * 100, 2)) + "%")
+    print("  Direction classifier   : " + str(round(direction_clf_acc * 100, 2)) + "%")
     print("  有效信号方向准确率     : " + str(round(signal_acc * 100, 2)) +
           "%  (|涨跌|>1%, 共" + str(signal_mask.sum()) + "条)")
     print("  情感因子提升           : +" +
@@ -294,6 +314,10 @@ def save_results(models, feat, all_feature_cols):
 
     model_feature_map = {}
     for name, (model, cols) in models.items():
+        if name == "_direction_classifier":
+            model.save_model(os.path.join(model_dir, "baseline_direction.json"))
+            joblib.dump(cols, os.path.join(model_dir, "direction_feature_cols.pkl"))
+            continue
         model.save_model(os.path.join(model_dir, name + ".json"))
         model_feature_map[name] = cols
 

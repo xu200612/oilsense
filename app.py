@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 import streamlit.components.v1 as components
-from xgboost import XGBRegressor
+from xgboost import XGBClassifier, XGBRegressor
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -542,6 +542,17 @@ def load_assets():
         m = XGBRegressor()
         m.load_model(os.path.join(ROOT_DIR, "models", name + ".json"))
         models[name] = m
+    direction_model = None
+    direction_feature_cols = None
+    direction_path = os.path.join(ROOT_DIR, "models", "baseline_direction.json")
+    direction_cols_path = os.path.join(ROOT_DIR, "models", "direction_feature_cols.pkl")
+    if os.path.exists(direction_path):
+        direction_model = XGBClassifier()
+        direction_model.load_model(direction_path)
+        if os.path.exists(direction_cols_path):
+            direction_feature_cols = joblib.load(direction_cols_path)
+        else:
+            direction_feature_cols = model_feature_map.get("baseline_mid", [])
     importance = pd.read_csv(
         os.path.join(ROOT_DIR, "data", "processed", "feature_importance.csv")
     )
@@ -553,7 +564,7 @@ def load_assets():
     news_path = os.path.join(ROOT_DIR, "data", "raw", "news_data.csv")
     if os.path.exists(news_path):
         news = pd.read_csv(news_path)
-    return feat, model_feature_map, models, importance, sentiment, news
+    return feat, model_feature_map, models, importance, sentiment, news, direction_model, direction_feature_cols
 @st.cache_data(ttl=3600)  # 每小时刷新
 def load_portwatch():
     """加载 PortWatch 咽喉点数据"""
@@ -695,7 +706,7 @@ def get_realtime_price():
         fallback_date  = str(feat.index[-1].date())
         return fallback_price, fallback_date, False
 
-feat, model_feature_map, models, importance, sentiment, news = load_assets()
+feat, model_feature_map, models, importance, sentiment, news, direction_model, direction_feature_cols = load_assets()
 
 
 @st.cache_data
@@ -706,6 +717,13 @@ def get_predictions():
     for name, model in models.items():
         cols = model_feature_map[name]
         pred_df["pred_" + name] = model.predict(feat[cols])
+    if direction_model is not None and direction_feature_cols:
+        try:
+            direction_prob = direction_model.predict_proba(feat[direction_feature_cols])[:, 1]
+            pred_df["pred_direction_prob"] = direction_prob
+            pred_df["pred_direction_signal"] = np.where(direction_prob >= 0.5, 1, -1)
+        except Exception:
+            pass
     return pred_df
 
 
@@ -1897,53 +1915,91 @@ elif page == "市场概览":
     # ── 花旗企业银行风险敞口速览 ──────────────────────────────────────
     st.divider()
     st.subheader("花旗企业银行风险敞口速览")
-    st.caption("基于当前油价水平的行业信用风险与融资需求预判")
+    st.caption("基于当前油价、未来10日预测区间、地缘政治、波动率与航运状态的行业信用风险与融资需求预判")
 
-    wti_now = rt_price
-    if wti_now < 70:
-        risk_tier = "低油价区间（<$70）"
-        sector_risks = [
-            ("航空业", "🟢 低风险", "燃油成本下降，利润改善，信用状况好转"),
-            ("化工/炼化", "🟢 低风险", "原料成本降低，炼厂利润率扩大"),
-            ("能源生产商", "🔴 高风险", "收入下滑，高杠杆油气公司偿债压力上升"),
-            ("能源贸易商", "🟡 中性", "价差收窄，套利机会减少"),
-        ]
-    elif wti_now < 90:
-        risk_tier = "正常区间（$70-$90）"
-        sector_risks = [
-            ("航空业", "🟡 中性", "燃油成本可控，关注对冲覆盖率"),
-            ("化工/炼化", "🟡 中性", "原料成本适中，产品价差稳定"),
-            ("能源生产商", "🟢 低风险", "价格覆盖成本，现金流健康"),
-            ("能源贸易商", "🟢 低风险", "市场流动性好，贸易融资需求平稳"),
-        ]
-    elif wti_now < 110:
-        risk_tier = "高油价区间（$90-$110）"
-        sector_risks = [
-            ("航空业", "🟠 偏高风险", "燃油成本压力显现，对冲不足者利润收窄"),
-            ("化工/炼化", "🟠 偏高风险", "原料成本传导滞后，短期利润承压"),
-            ("能源生产商", "🟢 低风险", "高油价受益，现金流充裕"),
-            ("能源贸易商", "🟠 偏高风险", "保证金压力上升，贸易融资需求增加"),
-        ]
-    else:
-        risk_tier = "极高油价区间（>$110）"
-        sector_risks = [
-            ("航空业", "🔴 高风险", "燃油成本极高，对冲不足者现金流断裂风险"),
-            ("化工/炼化", "🔴 高风险", "原料成本急升，需求萎缩双重打压"),
-            ("能源生产商", "🟢 低风险", "高价受益，但关注供应中断风险"),
-            ("能源贸易商", "🔴 高风险", "保证金追缴风险高，贸易融资需求激增50%+"),
-        ]
+    wti_now = safe_float(rt_price, 0.0)
+    interval_width = abs(safe_float(last_high, 0.0) - safe_float(last_low, 0.0))
+    forecast_mid = safe_float(last_mid, 0.0)
+    latest_feat = feat.iloc[-1] if len(feat) else pd.Series(dtype=float)
+    current_vix = safe_float(latest_feat.get("VIX", vix), vix)
+    current_vol_ratio = safe_float(latest_feat.get("vol_ratio", vol_ratio), vol_ratio)
+    current_sentiment = 0.0
+    current_news_count = 0
+    if sentiment is not None and len(sentiment) > 0:
+        last_sentiment_row = sentiment.sort_values("date").iloc[-1]
+        current_sentiment = safe_float(last_sentiment_row.get("sentiment_score", 0), 0.0)
+        current_news_count = int(safe_float(last_sentiment_row.get("news_count", 0), 0.0))
 
-    st.caption(f"当前 WTI ${wti_now:.1f} · {risk_tier}")
+    chokepoint_status = get_chokepoint_status()
+    stressed_chokepoints = [
+        item.get("name", "")
+        for item in chokepoint_status.values()
+        if ("高风险" in str(item.get("main_risk", ""))) or ("极高" in str(item.get("main_risk", "")))
+    ]
+    risk_tier = (
+        "低油价区间（<$70）" if wti_now < 70 else
+        "正常区间（$70-$90）" if wti_now < 90 else
+        "高油价区间（$90-$110）" if wti_now < 110 else
+        "极高油价区间（>$110）"
+    )
+
+    def _level(score):
+        if score >= 4:
+            return "高风险", "#e74c3c"
+        if score >= 3:
+            return "偏高风险", "#e67e22"
+        if score >= 2:
+            return "中性偏紧", "#f1c40f"
+        return "低风险", "#2ecc71"
+
+    shock_score = 0
+    if is_black_swan or extreme_active:
+        shock_score += 2
+    if interval_width > 0.18:
+        shock_score += 1
+    if current_vix >= 30 or current_vol_ratio >= 1.5:
+        shock_score += 1
+    if stressed_chokepoints:
+        shock_score += 1
+    if current_sentiment < -0.15:
+        shock_score += 1
+
+    sector_templates = [
+        ("航空与出行", 2 if wti_now >= 90 else 1, "燃油成本、套保覆盖率、票价传导滞后", "检查套保比例、现金流缺口和短贷续作压力"),
+        ("航运与物流", 2 if stressed_chokepoints else 1, "绕航成本、保险费率、交付周期拉长", "关注贸易融资期限错配与运费保证金占用"),
+        ("化工与炼化", 2 if wti_now >= 90 or forecast_mid > 0.03 else 1, "原料涨价、产品价差、库存重估", "区分一体化炼厂和单一化工客户的传导能力"),
+        ("能源生产商", 2 if wti_now < 70 else 0, "油价下跌时收入与储量估值承压，高油价时资本开支冲动上升", "关注高杠杆主体偿债覆盖率和资本开支纪律"),
+        ("能源贸易商", 2 if interval_width > 0.15 or shock_score >= 3 else 1, "波动率抬升导致保证金与信用证需求同步上升", "提高保证金监控频率，评估追加授信与抵押品质量"),
+        ("油服与设备", 1 if wti_now >= 85 else 2, "上游资本开支周期滞后，订单改善慢于油价", "关注应收账款回款和客户集中度"),
+        ("公用事业与新能源", 1 if wti_now >= 90 else 0, "燃料替代、购电成本与长期合约重定价", "检查燃料成本传导条款和长期项目现金流"),
+        ("大宗商品进口商", 2 if forecast_mid > 0 or current_sentiment < -0.15 else 1, "美元计价采购、库存成本和汇率联动", "结合DXY与油价区间设置采购节奏和套保边界"),
+    ]
+
+    sector_risks = []
+    for sector, base, trigger, action in sector_templates:
+        score = base + shock_score
+        if sector == "能源生产商" and wti_now >= 90:
+            score = max(1, score - 2)
+        if sector in ["航空与出行", "化工与炼化", "大宗商品进口商"] and forecast_mid > 0.03:
+            score += 1
+        level, color = _level(score)
+        sector_risks.append((sector, level, color, trigger, action))
+
+    choke_text = "、".join(stressed_chokepoints[:3]) if stressed_chokepoints else "主要咽喉点未触发高风险"
+    st.caption(
+        f"当前 WTI ${wti_now:.1f} · {risk_tier} · 未来10日中位预测 {forecast_mid:+.1%} · "
+        f"区间宽度 {interval_width:.1%} · VIX {current_vix:.1f} · 新闻{current_news_count}条 · {choke_text}"
+    )
     cols = st.columns(2)
-    for i, (sector, level, desc) in enumerate(sector_risks):
-        color = "#2ecc71" if "🟢" in level else "#e67e22" if "🟠" in level else "#e74c3c" if "🔴" in level else "#f1c40f"
+    for i, (sector, level, color, trigger, action) in enumerate(sector_risks):
         with cols[i % 2]:
             st.markdown(
                 f"<div style='background:rgba(255,255,255,0.04);border-left:3px solid {color};"
                 f"border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;'>"
                 f"<span style='color:#e8c97a;font-weight:700;font-size:13px;'>{sector}</span> "
                 f"<span style='font-size:12px;'>{level}</span>"
-                f"<p style='color:#aaa;font-size:12px;margin:4px 0 0;'>{desc}</p></div>",
+                f"<p style='color:#aaa;font-size:12px;margin:4px 0 0;'>风险来源：{trigger}</p>"
+                f"<p style='color:#777;font-size:12px;margin:3px 0 0;'>银行关注：{action}</p></div>",
                 unsafe_allow_html=True
             )
 
@@ -2010,14 +2066,6 @@ elif page == "风险预测":
 
         # 情景图直接从 last_low/last_mid/last_high 推算
         # 保证与上方 P10/P50/P90 数字完全一致，不再独立计算
-        if scenarios_30d:
-            vals   = list(scenarios_30d.values())
-            labels = list(scenarios_30d.keys())
-        else:
-            # 降级：从10日预测外推30日（简单线性缩放）
-            vals   = [last_low * 3, last_mid * 3, last_high * 3]
-            labels = ["缓解情景", "基准情景", "升级情景"]
-
         colors = ["#2ecc71", "#f1c40f", "#e74c3c"]
 
         if scenarios_30d:
@@ -2027,9 +2075,7 @@ elif page == "风险预测":
             vals   = [0.03, 0.08, 0.18]
             labels = ["缓解情景", "基准情景", "升级情景"]
 
-        # 每个情景的价格区间：以当前价为基准，用30日涨跌幅推算
-        # 低端 = 当前价 × (1 + 情景涨跌幅 × 0.7)
-        # 高端 = 当前价 × (1 + 情景涨跌幅 × 1.3)
+        # 每个情景的价格区间：优先使用情景模型；若情景模型退化为近零，则回到P10/P50/P90风险区间。
         scenarios = {}
         for i, (label, val) in enumerate(zip(labels, vals)):
             val = safe_float(val, 0.0)
@@ -2038,6 +2084,41 @@ elif page == "风险预测":
             if low > high:
                 low, high = high, low
             scenarios[label] = {"low": low, "high": high, "color": colors[i % len(colors)]}
+
+        all_prices = [p for s in scenarios.values() for p in (s["low"], s["high"])]
+        scenario_span = max(all_prices) - min(all_prices) if all_prices else 0
+        if scenario_span < max(rt_price * 0.05, 5):
+            p10 = round(rt_price * (1 + last_low), 1)
+            p50 = round(rt_price * (1 + last_mid), 1)
+            p90 = round(rt_price * (1 + last_high), 1)
+            p10, p90 = min(p10, p90), max(p10, p90)
+            mid_half = max(rt_price * 0.035, (p90 - p10) * 0.18)
+            scenarios = {
+                "快速缓解": {
+                    "low": min(p10, rt_price, p50),
+                    "high": max(min(rt_price, p50), min(p10, rt_price, p50) + rt_price * 0.03),
+                    "color": "#2ecc71",
+                },
+                "僵持延续": {
+                    "low": round(max(p10, p50 - mid_half), 1),
+                    "high": round(min(p90, p50 + mid_half), 1),
+                    "color": "#f1c40f",
+                },
+                "全面升级": {
+                    "low": round(min(max(rt_price, p50), p90), 1),
+                    "high": max(p90, round(min(max(rt_price, p50), p90) + rt_price * 0.03, 1)),
+                    "color": "#e74c3c",
+                },
+            }
+
+        y_values = [rt_price] + [p for s in scenarios.values() for p in (s["low"], s["high"])]
+        y_min, y_max = min(y_values), max(y_values)
+        if y_max - y_min < max(rt_price * 0.08, 8):
+            y_min, y_max = rt_price * 0.92, rt_price * 1.08
+        else:
+            pad = (y_max - y_min) * 0.12
+            y_min, y_max = y_min - pad, y_max + pad
+
         fig_bs = go.Figure()
         fig_bs.add_hline(
             y=rt_price, line_dash="dash", line_color="white", line_width=2,
@@ -2056,7 +2137,7 @@ elif page == "风险预测":
             height=400, margin=dict(l=0, r=0, t=30, b=0),
             plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
             font=dict(color="white"),
-            yaxis=dict(gridcolor="#2d3748", title="WTI 美元/桶"),
+            yaxis=dict(gridcolor="#2d3748", title="WTI 美元/桶", range=[y_min, y_max]),
             xaxis=dict(gridcolor="#2d3748"),
             showlegend=False, barmode="overlay",
             title="未来1-2周 WTI 价格情景区间",
@@ -2277,48 +2358,104 @@ elif page == "风险预测":
         acc   = np.mean(np.sign(mid[valid]) == np.sign(act[valid])) if valid.sum() > 0 else 0.5
         perf[version] = round(acc * 100, 2)
 
-    # 极端期间：用情景匹配模型的方向（weighted_return_10d 的符号 vs 实际）
-    extreme_acc = None
-    if len(extreme_df) > 0 and extreme_result is not None and (
-        extreme_result.get("activated") or is_black_swan
-    ):
-        pred_dir  = np.sign(safe_float(extreme_result.get("weighted_return_10d", 0), 0.0))
-        act_ext   = extreme_df["target"].dropna()
-        if len(act_ext) > 0:
-            extreme_acc = round(
-                float(np.mean(np.sign(act_ext) == pred_dir)) * 100, 2
+    direction_acc = perf["baseline"]
+    direction_label = "Baseline方向命中率（正常期）"
+    if "pred_direction_signal" in normal_df.columns:
+        act = normal_df["target"]
+        sig = normal_df["pred_direction_signal"]
+        valid = act.notna() & sig.notna()
+        if valid.sum() > 0:
+            direction_acc = round(
+                float(np.mean(sig[valid] == np.sign(act[valid]))) * 100, 2
             )
+            direction_label = "方向分类器命中率（正常期）"
 
-    # 综合准确率（加权平均）
+    # 极端期间：逐日重算情景匹配，避免用“当前一个方向”对比整段历史。
+    extreme_acc = None
+    extreme_eval_n = 0
+    if len(extreme_df) > 0:
+        try:
+            from extreme_scenario import get_extreme_prediction as _rolling_extreme_prediction
+            pred_dirs = []
+            actual_dirs = []
+            for idx, row in extreme_df.iterrows():
+                if idx not in feat.index or pd.isna(row.get("target")):
+                    continue
+                daily_result = _rolling_extreme_prediction(
+                    feat.loc[idx],
+                    safe_float(row.get("pred_enhanced_low", row.get("pred_baseline_low", 0)), 0.0),
+                    safe_float(row.get("pred_baseline_mid", 0), 0.0),
+                    safe_float(row.get("pred_enhanced_high", row.get("pred_baseline_high", 0)), 0.0),
+                    force_activate=True,
+                )
+                daily_return = safe_float(daily_result.get("weighted_return_10d", 0), 0.0)
+                if abs(daily_return) < 1e-9:
+                    daily_return = safe_float(daily_result.get("pred_mid", 0), 0.0)
+                pred_dirs.append(np.sign(daily_return))
+                actual_dirs.append(np.sign(safe_float(row.get("target", 0), 0.0)))
+            if actual_dirs:
+                extreme_eval_n = len(actual_dirs)
+                extreme_acc = round(
+                    float(np.mean(np.array(pred_dirs) == np.array(actual_dirs))) * 100, 2
+                )
+        except Exception:
+            extreme_acc = None
+
+    # 综合方向命中率（加权平均）
     n_normal  = normal_df["target"].notna().sum()
     n_extreme = extreme_df["target"].notna().sum()
     n_total   = n_normal + n_extreme
     if extreme_acc is not None and n_total > 0:
         hybrid_acc = round(
-            (perf["baseline"] * n_normal + extreme_acc * n_extreme) / n_total, 2
+            (direction_acc * n_normal + extreme_acc * n_extreme) / n_total, 2
         )
     else:
-        hybrid_acc = perf["baseline"]
+        hybrid_acc = direction_acc
+
+    baseline_mae = baseline_rmse = enhanced_coverage = enhanced_width = None
+    try:
+        act_all = test_df["target"]
+        base_mid = test_df["pred_baseline_mid"]
+        valid_base = act_all.notna() & base_mid.notna()
+        baseline_mae = float((base_mid[valid_base] - act_all[valid_base]).abs().mean()) * 100
+        baseline_rmse = float(np.sqrt(((base_mid[valid_base] - act_all[valid_base]) ** 2).mean())) * 100
+        enh_low = test_df["pred_enhanced_low"]
+        enh_high = test_df["pred_enhanced_high"]
+        valid_enh = act_all.notna() & enh_low.notna() & enh_high.notna()
+        enhanced_coverage = float(((act_all[valid_enh] >= enh_low[valid_enh]) & (act_all[valid_enh] <= enh_high[valid_enh])).mean()) * 100
+        enhanced_width = float((enh_high[valid_enh] - enh_low[valid_enh]).mean()) * 100
+    except Exception:
+        pass
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("综合准确率（双模型）", f"{hybrid_acc}%",
+        st.metric("综合方向命中率（参考）", f"{hybrid_acc}%",
                   f"+{round(hybrid_acc-50,2)}% vs 随机基准")
     with col2:
-        st.metric("Baseline 准确率（正常期）", f"{perf['baseline']}%",
-                  f"+{round(perf['baseline']-50,2)}%")
+        st.metric(direction_label, f"{direction_acc}%",
+                  f"Baseline {perf['baseline']}%")
     with col3:
         if extreme_acc is not None:
-            st.metric("情景匹配准确率（极端期）", f"{extreme_acc}%",
-                      f"+{round(extreme_acc-50,2)}%")
+            st.metric("情景滚动命中率（极端期）", f"{extreme_acc}%",
+                      f"{extreme_eval_n}条滚动样本")
         else:
-            st.metric("情景匹配准确率（极端期）", "暂无数据",
+            st.metric("情景滚动命中率（极端期）", "暂无数据",
                       "极端期间样本不足")
     with col4:
         st.metric("测试集样本数", f"{len(test_df)} 条",
                   f"正常{n_normal}条 极端{n_extreme}条")
 
-    st.caption("💡 正常市场方向由 Baseline XGBoost 负责，风险区间由 Enhanced/GDELT/PortWatch 负责，极端事件期间自动切换至历史情景匹配模型")
+    q1, q2, q3, q4 = st.columns(4)
+    with q1:
+        st.metric("Baseline MAE", "--" if baseline_mae is None else f"{baseline_mae:.2f}%")
+    with q2:
+        st.metric("Baseline RMSE", "--" if baseline_rmse is None else f"{baseline_rmse:.2f}%")
+    with q3:
+        st.metric("Enhanced区间覆盖率", "--" if enhanced_coverage is None else f"{enhanced_coverage:.2f}%")
+    with q4:
+        st.metric("平均预测区间宽度", "--" if enhanced_width is None else f"{enhanced_width:.2f}%")
+
+    st.caption("说明：方向命中率只衡量未来10日涨跌方向；MAE/RMSE衡量幅度误差；区间覆盖率衡量实际涨跌是否落入P10-P90风险区间。情景匹配已改为逐日滚动回测，不再用当前单一情景方向对整段历史做比较。")
 
     st.divider()
 
@@ -2376,6 +2513,20 @@ elif page == "历史回测":
         end_date = st.date_input("结束日期", value=pred_df.index[-1])
 
     filtered = pred_df.loc[str(start_date):str(end_date)]
+    return_cols = [
+        "pred_enhanced_low", "pred_enhanced_high",
+        "pred_baseline_mid", "pred_enhanced_mid", "target",
+    ]
+    return_values = filtered[[c for c in return_cols if c in filtered.columns]].replace(
+        [np.inf, -np.inf], np.nan
+    ).stack()
+    if len(return_values) > 0:
+        lower_q, upper_q = return_values.quantile([0.02, 0.98])
+        max_abs = max(abs(safe_float(lower_q, -0.2)), abs(safe_float(upper_q, 0.2)), 0.12)
+        max_abs = min(max_abs * 1.25, 0.60)
+        return_axis_range = [-max_abs, max_abs]
+    else:
+        return_axis_range = [-0.3, 0.3]
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         row_heights=[0.55, 0.45], vertical_spacing=0.05)
@@ -2417,15 +2568,17 @@ elif page == "历史回测":
             add_vertical_marker(fig, edate, text=event["label"], color=event["color"])
 
     fig.update_layout(
-        height=620, margin=dict(l=0, r=0, t=30, b=0),
+        height=640, margin=dict(l=0, r=0, t=82, b=0),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         font=dict(color="white"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
+        legend=dict(orientation="h", yanchor="bottom", y=1.08,
                     bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
     )
-    fig.update_yaxes(gridcolor="#2d3748")
+    fig.update_yaxes(gridcolor="#2d3748", title_text="WTI 美元/桶", row=1, col=1)
+    fig.update_yaxes(gridcolor="#2d3748", title_text="未来10日涨跌幅", tickformat=".0%", range=return_axis_range, row=2, col=1)
     fig.update_xaxes(gridcolor="#2d3748")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.caption("为保证可读性，下方涨跌幅图按2%-98%分位做坐标裁剪；2020年负油价等极端离群点仍保留在数据中，但不拉伸整张图。")
 
     st.divider()
 
