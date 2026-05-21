@@ -3,10 +3,42 @@ import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from uuid import uuid4
 from dotenv import load_dotenv
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
+
+
+def _load_previous_analysis_context() -> str:
+    report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
+    if not os.path.exists(report_path):
+        return ""
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        previous = str(cached.get("analysis", {}).get("analysis", "")).strip()
+        if not previous:
+            return ""
+        previous = previous.replace("\r", "\n")
+        previous = "\n".join(line.strip() for line in previous.splitlines() if line.strip())
+        return previous[:1200]
+    except Exception:
+        return ""
+
+
+def _select_analysis_angle(run_id: str) -> str:
+    angles = [
+        "事件指挥室版：优先说明触发信号、应急动作和监控阈值。",
+        "企业敞口压力测试版：优先说明客户现金流、保证金和授信影响。",
+        "评委答辩版：优先说明系统如何连接新闻、航运、GDELT和情景匹配。",
+        "交易融资风险版：优先说明信用证、库存融资、保证金和期限错配。",
+    ]
+    try:
+        idx = int(run_id.rsplit("-", 1)[-1], 16) % len(angles)
+    except Exception:
+        idx = sum(ord(ch) for ch in run_id) % len(angles)
+    return angles[idx]
 
 
 # ── 黑天鹅触发与退出条件 ─────────────────────────────────────────────────
@@ -248,14 +280,24 @@ def run_deepseek_analysis(signals: dict, recent_news: list = None) -> dict:
 
     client  = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     context = _build_context(signals, recent_news)
-    analysis_run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    analysis_run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + uuid4().hex[:6]
+    previous_analysis = _load_previous_analysis_context()
+    analysis_angle = _select_analysis_angle(analysis_run_id)
     refresh_instruction = (
         "\n\n【本次生成控制】\n"
         "情景分析生成时间：" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n"
         "情景分析编号：" + analysis_run_id + "\n"
+        "本次写作角度：" + analysis_angle + "\n"
         "请基于同一批信号重新组织分析表达、表格措辞和建议侧重点。核心判断必须忠于数据，"
-        "但不要复用上一版分析的标题、开头句、段落顺序和整段措辞。\n"
+        "但不要复用上一版分析的标题、开头句、段落顺序和整段措辞。"
+        "正文第一行必须写明：情景分析编号 " + analysis_run_id + "。\n"
     )
+    if previous_analysis:
+        refresh_instruction += (
+            "\n【上一版情景分析摘录：用于避免重复，不要照抄】\n"
+            + previous_analysis +
+            "\n【反重复要求】上面的摘录只能用于避开旧措辞。请保留必要事实，但换一个分析角度和组织顺序。\n"
+        )
 
     prompt = context + refresh_instruction + """
 
@@ -305,13 +347,19 @@ def run_deepseek_analysis(signals: dict, recent_news: list = None) -> dict:
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1500,
-            temperature=0.35,
+            temperature=0.55,
+            presence_penalty=0.25,
+            frequency_penalty=0.25,
         )
         analysis_text = response.choices[0].message.content
+        if analysis_run_id not in analysis_text[:300]:
+            analysis_text = "情景分析编号 " + analysis_run_id + "\n\n" + analysis_text
         return {
             "analysis"    : analysis_text,
             "model"       : "deepseek-chat",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "analysis_run_id": analysis_run_id,
+            "analysis_angle" : analysis_angle,
             "signals"     : signals,
             "status"      : "ok",
         }
@@ -320,7 +368,7 @@ def run_deepseek_analysis(signals: dict, recent_news: list = None) -> dict:
 
 
 # ── 主入口 ────────────────────────────────────────────────────────────────
-def get_black_swan_report(recent_news: list = None) -> dict:
+def get_black_swan_report(recent_news: list = None, force_refresh: bool = True) -> dict:
     is_black_swan, signals = detect_black_swan()
 
     if not is_black_swan:

@@ -1204,36 +1204,52 @@ if is_black_swan:
     )
 
     # 展开显示 DeepSeek 分析
-    if st.button("查看AI情景分析详情", key="bs_report_btn", use_container_width=True):
-        report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
-        if os.path.exists(report_path):
-            import json
-            with open(report_path, "r", encoding="utf-8") as f:
-                report = json.load(f)
-            analysis = report.get("analysis", {}).get("analysis", "")
-            if analysis:
-                st.markdown(analysis)
-                gen_time = report.get("analysis", {}).get("generated_at", "")
-                st.caption("AI 分析生成时间：" + gen_time +
-                           " ｜ 模型：Claude Sonnet 4.6 ｜ 数据源：IMF PortWatch")
-            else:
-                st.warning("分析报告生成中，请稍后刷新")
-        else:
-            # 实时生成
-            with st.spinner("正在调用 Claude 进行情景分析..."):
-                try:
-                    from black_swan import get_black_swan_report
-                    import black_swan
-                    black_swan.ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+    report_path = os.path.join(ROOT_DIR, "data", "raw", "black_swan_report.json")
+    has_bs_cache = os.path.exists(report_path)
+    col_bs1, col_bs2 = st.columns([1, 1])
+    with col_bs1:
+        regen_bs_report = st.button("重新生成AI情景分析", key="bs_report_regen_btn", use_container_width=True)
+    with col_bs2:
+        show_bs_cache = st.button("查看上次AI情景分析", key="bs_report_cache_btn", use_container_width=True) if has_bs_cache else False
 
-                    report = get_black_swan_report()
-                    analysis = report.get("analysis", {}).get("analysis", "")
-                    if analysis:
-                        st.markdown(analysis)
-                    else:
-                        st.warning("分析生成失败，请检查 DEEPSEEK_API_KEY")
-                except Exception as e:
-                    st.error("黑天鹅分析调用失败：" + str(e))
+    if regen_bs_report:
+        with st.spinner("正在调用 DeepSeek 重新生成情景分析..."):
+            try:
+                from black_swan import get_black_swan_report
+                import black_swan
+                black_swan.ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+                report = get_black_swan_report(force_refresh=True)
+                analysis_obj = report.get("analysis", {})
+                analysis = analysis_obj.get("analysis", "")
+                if analysis:
+                    st.markdown(analysis)
+                    st.caption(
+                        "AI 分析生成时间：" + analysis_obj.get("generated_at", "") +
+                        " ｜ 编号：" + analysis_obj.get("analysis_run_id", "") +
+                        " ｜ 模型：" + analysis_obj.get("model", "deepseek-chat") +
+                        " ｜ 数据源：IMF PortWatch / GDELT / News"
+                    )
+                else:
+                    st.warning("分析生成失败，请检查 DEEPSEEK_API_KEY")
+            except Exception as e:
+                st.error("黑天鹅分析调用失败：" + str(e))
+    elif show_bs_cache:
+        import json
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        analysis_obj = report.get("analysis", {})
+        analysis = analysis_obj.get("analysis", "")
+        if analysis:
+            st.markdown(analysis)
+            st.caption(
+                "上次AI分析生成时间：" + analysis_obj.get("generated_at", "") +
+                " ｜ 编号：" + analysis_obj.get("analysis_run_id", "") +
+                " ｜ 模型：" + analysis_obj.get("model", "deepseek-chat") +
+                " ｜ 数据源：IMF PortWatch / GDELT / News"
+            )
+        else:
+            st.warning("缓存分析为空，请重新生成")
 
 if page == "全球能源地图":
     st.title("全球能源地图")
@@ -2235,6 +2251,7 @@ elif page == "风险预测":
         st.caption(
             "上次生成：" + cached.get("generated_at", "") +
             " ｜ 模式：" + cached.get("mode", "") +
+            " ｜ 编号：" + cached.get("report_run_id", "") +
             " ｜ 模型：" + cached.get("model", "")
         )
 
@@ -2269,8 +2286,11 @@ elif page == "风险预测":
                 if result["status"] == "ok":
                     st.success(
                         "报告生成成功 ｜ 模式：" + result["mode"] +
-                        " ｜ 生成时间：" + result["generated_at"]
+                        " ｜ 生成时间：" + result["generated_at"] +
+                        " ｜ 编号：" + result.get("report_run_id", "")
                     )
+                    if result.get("report_angle"):
+                        st.caption("本次写作角度：" + result["report_angle"])
                     st.markdown(result["report"])
                     st.download_button(
                         label="下载报告（TXT）",

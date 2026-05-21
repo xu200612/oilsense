@@ -2,6 +2,7 @@ import os
 import json
 import pandas as pd
 from datetime import datetime
+from uuid import uuid4
 from dotenv import load_dotenv
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,46 @@ LEGACY_ENV_PATH = os.path.join(
 )
 if os.path.exists(LEGACY_ENV_PATH):
     load_dotenv(dotenv_path=LEGACY_ENV_PATH)
+
+
+def _load_previous_report_context() -> str:
+    """Return a compact excerpt from the previous generated report to discourage repetition."""
+    report_path = os.path.join(ROOT_DIR, "data", "raw", "latest_report.json")
+    if not os.path.exists(report_path):
+        return ""
+
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        previous = str(cached.get("report", "")).strip()
+        if not previous:
+            return ""
+        previous = previous.replace("\r", "\n")
+        previous = "\n".join(line.strip() for line in previous.splitlines() if line.strip())
+        return previous[:1200]
+    except Exception:
+        return ""
+
+
+def _select_report_angle(run_id: str, is_black_swan: bool) -> str:
+    normal_angles = [
+        "客户经理晨会版：先讲客户敞口和银行动作，再解释模型驱动。",
+        "风险委员会版：先讲风险等级、置信边界和触发阈值，再讲行业影响。",
+        "答辩展示版：先讲数据源和模型如何形成判断，再落到企业银行价值。",
+        "授信审查版：先讲现金流、保证金、贸易融资和授信监控，再讲市场背景。",
+    ]
+    black_swan_angles = [
+        "事件指挥室版：先讲触发信号和应急动作，再讲价格路径。",
+        "企业敞口压力测试版：先讲客户现金流压力，再讲供应缺口和历史类比。",
+        "评委答辩版：先讲系统如何把新闻、航运和模型连接起来，再讲银行价值。",
+        "授信预警版：先讲哪些客户需要提额/压降/补保证金，再讲情景概率边界。",
+    ]
+    pool = black_swan_angles if is_black_swan else normal_angles
+    try:
+        idx = int(run_id.rsplit("-", 1)[-1], 16) % len(pool)
+    except Exception:
+        idx = sum(ord(ch) for ch in run_id) % len(pool)
+    return pool[idx]
 
 
 def _build_normal_context(
@@ -193,14 +234,24 @@ def generate_report(
 ) -> dict:
     # 强制重新加载 .env，避免Streamlit缓存旧Key
     load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"), override=True)
-    report_run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    report_run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + uuid4().hex[:6]
+    previous_report = _load_previous_report_context()
+    report_angle = _select_report_angle(report_run_id, is_black_swan)
     refresh_instruction = (
         "\n\n【本次生成控制】\n"
         "报告生成时间：" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n"
         "报告编号：" + report_run_id + "\n"
+        "本次写作角度：" + report_angle + "\n"
         "请基于同一批数据重新组织分析表达和段落侧重点。核心判断必须忠于数据，"
-        "但不要复用上一版报告的标题、开头句、段落顺序和整段措辞。\n"
+        "但不要复用上一版报告的标题、开头句、段落顺序和整段措辞。"
+        "报告正文第一行必须写明：报告编号 " + report_run_id + "。\n"
     )
+    if previous_report:
+        refresh_instruction += (
+            "\n【上一版报告摘录：用于避免重复，不要照抄】\n"
+            + previous_report +
+            "\n【反重复要求】上面的摘录只能用于避开旧措辞。请保留必要事实，但换一个分析角度和组织顺序。\n"
+        )
 
     try:
         from openai import OpenAI
@@ -278,9 +329,13 @@ def generate_report(
                 {"role": "user",   "content": prompt},
             ],
             max_tokens=max_tokens,
-            temperature=0.35,
+            temperature=0.55,
+            presence_penalty=0.25,
+            frequency_penalty=0.25,
         )
         report_text = response.choices[0].message.content
+        if report_run_id not in report_text[:300]:
+            report_text = "报告编号 " + report_run_id + "\n\n" + report_text
 
         result = {
             "report"       : report_text,
@@ -288,6 +343,8 @@ def generate_report(
             "current_price": current_price,
             "is_black_swan": is_black_swan,
             "generated_at" : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "report_run_id": report_run_id,
+            "report_angle" : report_angle,
             "model"        : "Claude Sonnet 4.6",
             "status"       : "ok",
         }
