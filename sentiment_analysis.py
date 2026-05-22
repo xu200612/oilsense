@@ -20,7 +20,12 @@ if os.path.exists(LEGACY_ENV_PATH):
     load_dotenv(dotenv_path=LEGACY_ENV_PATH)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+DEEPSEEK_TIMEOUT_SECONDS = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "20"))
+client = OpenAI(
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com",
+    timeout=DEEPSEEK_TIMEOUT_SECONDS,
+)
 
 DETAIL_PATH = os.path.join(ROOT_DIR, "data", "processed", "news_sentiment_detail.csv")
 FACTOR_PATH = os.path.join(ROOT_DIR, "data", "processed", "daily_sentiment.csv")

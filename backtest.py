@@ -115,7 +115,7 @@ def plot_price_with_risk(pred_df):
     out_path = os.path.join(ROOT_DIR, "data", "processed", "backtest_price_risk.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print("  已保存：backtest_price_risk.png")
-    plt.show()
+    plt.close(fig)
 
 # ── 绘图2：特征重要性 ──────────────────────────────────────────────────────
 def plot_feature_importance():
@@ -148,7 +148,7 @@ def plot_feature_importance():
     out_path = os.path.join(ROOT_DIR, "data", "processed", "feature_importance.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print("  已保存：feature_importance.png")
-    plt.show()
+    plt.close(fig)
 
 # ── 绘图3：危机窗口放大图 ──────────────────────────────────────────────────
 def plot_crisis_zoom(pred_df):
@@ -196,7 +196,7 @@ def plot_crisis_zoom(pred_df):
     out_path = os.path.join(ROOT_DIR, "data", "processed", "backtest_crisis_zoom.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print("  已保存：backtest_crisis_zoom.png")
-    plt.show()
+    plt.close(fig)
 
 def plot_model_comparison(pred_df):
     print("正在绘制模型对比图...")
@@ -242,7 +242,7 @@ def plot_model_comparison(pred_df):
     out_path = os.path.join(ROOT_DIR, "data", "processed", "model_comparison.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print("  已保存：model_comparison.png")
-    plt.show()
+    plt.close(fig)
 
 # ── 主程序 ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
