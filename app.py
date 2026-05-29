@@ -762,7 +762,6 @@ def get_integrated_output(_feat):
 
         is_extreme = (vol_r > 2.0 or vix_val > 30 or hormuz_z > 2.0 or
                       hormuz_blocked > 0 or
-                      gdelt_ci < -6.5 or
                       (geo_flag > 0 and gdelt_ci < -4.0))
 
         if is_extreme and idx in pred_df.index:
@@ -2691,10 +2690,9 @@ elif page == "历史回测":
         _c1.metric("方向准确率", _pct(_vm.get("dir_acc")))
         _c2.metric("MAE", _pct(_vm.get("mae"), 2))
         _c3.metric("P10-P90覆盖", _pct(_vm.get("coverage")))
-        _c4, _c5, _c6 = st.columns(3)
+        _c4, _c5 = st.columns(2)
         _c4.metric("信号准确率", _pct(_vm.get("sig_acc")))
         _c5.metric("RMSE", _pct(_vm.get("rmse"), 2))
-        _c6.metric("最大回撤", _pct(_vm.get("mdd")))
 
     with _col_o:
         _n2 = _om.get("n", 0)
@@ -2710,10 +2708,9 @@ elif page == "历史回测":
         _d1.metric("方向准确率", _pct(_om.get("dir_acc")))
         _d2.metric("MAE", _pct(_om.get("mae"), 2))
         _d3.metric("P10-P90覆盖", _pct(_om.get("coverage")))
-        _d4, _d5, _d6 = st.columns(3)
+        _d4, _d5 = st.columns(2)
         _d4.metric("信号准确率", _pct(_om.get("sig_acc")))
         _d5.metric("RMSE", _pct(_om.get("rmse"), 2))
-        _d6.metric("最大回撤", _pct(_om.get("mdd")))
         if _n2 > 0:
             st.caption(f"第二层（极端情景）激活 {_ex2}/{_n2} 天（{_ex2/_n2*100:.0f}%）｜"
                        "2026+ 为霍尔木兹封锁期，XGBoost 退出，由情景匹配主导")

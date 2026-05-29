@@ -42,13 +42,33 @@ EXTREME_EVENTS = [
         "severity"   : "extreme",
     },
     {
+        "name"       : "美中贸易战冲击",
+        "start"      : "2018-09-24",
+        "peak"       : "2018-10-03",
+        "end"        : "2018-12-31",
+        "trigger"    : "macro",
+        "description": "美中加征关税升级，全球需求预期下调，WTI从$76跌至$42，贸易政策驱动需求端崩溃",
+        "typical_30d": -0.12,
+        "severity"   : "severe",
+    },
+    {
         "name"       : "特朗普关税冲击",
         "start"      : "2025-03-24",
         "peak"       : "2025-04-02",
         "end"        : "2025-04-15",
         "trigger"    : "macro",
-        "description": "特朗普宣布全面对等关税，全球需求担忧，油价单周暴跌12%",
+        "description": "特朗普宣布全面对等关税，全球需求担忧，油价单周暴跌12%，VIX飙至52",
         "typical_30d": -0.15,
+        "severity"   : "severe",
+    },
+    {
+        "name"       : "俄乌后地缘溢价消退",
+        "start"      : "2022-06-08",
+        "peak"       : "2022-07-05",
+        "end"        : "2022-09-30",
+        "trigger"    : "supply_policy",
+        "description": "俄乌冲突高峰后需求担忧抬头，布伦特从$139回调至$90，地缘溢价消退叠加衰退预期",
+        "typical_30d": -0.22,
         "severity"   : "severe",
     },
 
@@ -214,27 +234,40 @@ def _load_feature_matrix():
 
 def _infer_trigger_type(current_features: pd.Series) -> str:
     """
-    根据当前特征推断最可能的触发类型，用于分类匹配
-    """
-    hormuz_z = abs(float(current_features.get("hormuz_tanker_zscore", 0)))
-    geo_flag = float(current_features.get("geopolitics_flag", 0))
-    gdelt_ci = float(current_features.get("gdelt_conflict_intensity", 0))
-    vix      = float(current_features.get("VIX", 20))
-    vol_ratio= float(current_features.get("vol_ratio", 1))
-    ret_5d   = float(current_features.get("return_5d", 0))
+    根据当前特征推断最可能的触发类型，用于分类匹配。
 
-    # 霍尔木兹/航运异常 → 地缘政治
-    if hormuz_z > 2.0 or (geo_flag > 0 and gdelt_ci < -3):
-        return "geopolitics"
-    # VIX极高+油价下跌 → 宏观冲击
+    优先级设计原则：
+    1. 宏观冲击优先（VIX极高+油价大跌），避免关税/衰退期被误判为地缘政治
+    2. 实际封锁信号（hormuz_blocked）是最确定的地缘政治
+    3. 高波动+大跌但非宏观崩溃 → 供应/政策
+    4. 高波动+上涨 → 地缘供应中断或需求恢复
+    """
+    hormuz_blocked = float(current_features.get("hormuz_blocked", 0))
+    hormuz_z       = abs(float(current_features.get("hormuz_tanker_zscore", 0)))
+    vix            = float(current_features.get("VIX", 20))
+    vol_ratio      = float(current_features.get("vol_ratio", 1))
+    ret_5d         = float(current_features.get("return_5d", 0))
+    ret_1d         = float(current_features.get("return_1d", 0))
+
+    # 1. 宏观冲击优先：VIX极高 + 油价大跌（关税冲击、衰退、金融危机均满足）
     if vix > 35 and ret_5d < -0.05:
         return "macro"
-    # 高波动+油价下跌（无明显地缘信号）→ 供应政策
-    if vol_ratio > 2.0 and ret_5d < -0.03:
+
+    # 2. 实际霍尔木兹封锁：最确定的地缘政治信号
+    if hormuz_blocked > 0:
+        return "geopolitics"
+
+    # 3. 航运显著异常（z-score > 2.5，比原来更保守）→ 地缘政治
+    if hormuz_z > 2.5:
+        return "geopolitics"
+
+    # 4. 高波动 + 明显下跌（无宏观崩溃，无封锁）→ 供应/政策驱动
+    if vol_ratio > 2.0 and ret_5d < -0.05:
         return "supply_policy"
-    # 高波动+油价上涨 → 可能是需求恢复或地缘
-    if vol_ratio > 1.5 and ret_5d > 0.03:
-        return "geopolitics" if geo_flag > 0 else "demand_recovery"
+
+    # 5. 高波动 + 明显上涨 → 地缘供应中断（若有航运信号）或需求恢复
+    if vol_ratio > 1.5 and ret_5d > 0.05:
+        return "geopolitics" if hormuz_z > 1.5 else "demand_recovery"
 
     return "mixed"
 
@@ -359,16 +392,13 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
     geo_flag        = float(current_features.get("geopolitics_flag", 0))
     gdelt_ci        = float(current_features.get("gdelt_conflict_intensity", 0))
 
-    # 激活条件（任意一个触发）
-    # hormuz_blocked=1 与 get_integrated_output 保持一致，避免外层触发但内层不激活导致情景匹配跳过
-    # gdelt_ci < -6.5（不要求 geo_flag）覆盖极端冲突强度的预封锁期
+    # 激活条件（任意一个触发），与 get_integrated_output 保持一致
     is_extreme = force_activate or (
-        vol_ratio       > 2.0  or
-        vix             > 30   or
-        abs(hormuz_z)   > 2.0  or
-        hormuz_blocked  > 0    or
-        gdelt_ci        < -6.5 or          # 极端冲突强度，无需 geo_flag
-        (geo_flag > 0 and gdelt_ci < -4.0) # 有地缘信号时阈值放宽
+        vol_ratio      > 2.0  or
+        vix            > 30   or
+        abs(hormuz_z)  > 2.0  or
+        hormuz_blocked > 0    or
+        (geo_flag > 0 and gdelt_ci < -4.0)
     )
 
     if not is_extreme:
