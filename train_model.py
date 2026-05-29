@@ -222,7 +222,7 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
         model.fit(X_tr[baseline_feature_cols], y_tr,
                   eval_set=[(X_val[baseline_feature_cols], y_val)], verbose=False)
         models["baseline_" + label] = (model, baseline_feature_cols)
-        print("  Baseline " + label + " ✓  (迭代: " + str(model.best_iteration) + ")")
+        print("  Baseline " + label + " OK (迭代: " + str(model.best_iteration) + ")")
 
     baseline_mid = XGBRegressor(
         n_estimators=500, max_depth=3, learning_rate=0.05,
@@ -233,7 +233,7 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
     baseline_mid.fit(X_tr[baseline_feature_cols], y_tr,
                      eval_set=[(X_val[baseline_feature_cols], y_val)], verbose=False)
     models["baseline_mid"] = (baseline_mid, baseline_feature_cols)
-    print("  Baseline mid ✓  (迭代: " + str(baseline_mid.best_iteration) + ")")
+    print("  Baseline mid OK (迭代: " + str(baseline_mid.best_iteration) + ")")
 
     direction_y_tr = (y_tr > 0).astype(int)
     direction_y_val = (y_val > 0).astype(int)
@@ -249,7 +249,7 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
         verbose=False
     )
     models["_direction_classifier"] = (direction_classifier, baseline_feature_cols)
-    print("  Baseline direction classifier ✓  (迭代: " + str(direction_classifier.best_iteration) + ")")
+    print("  Baseline direction classifier OK (迭代: " + str(direction_classifier.best_iteration) + ")")
 
     # ── Enhanced ───────────────────────────────────────────────────────────
     for quantile, label in [(0.1, "low"), (0.9, "high")]:
@@ -262,7 +262,7 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
         model.fit(X_tr[all_feature_cols], y_tr,
                   eval_set=[(X_val[all_feature_cols], y_val)], verbose=False)
         models["enhanced_" + label] = (model, all_feature_cols)
-        print("  Enhanced " + label + " ✓  (迭代: " + str(model.best_iteration) + ")")
+        print("  Enhanced " + label + " OK (迭代: " + str(model.best_iteration) + ")")
 
     enhanced_mid = XGBRegressor(
         n_estimators=500, max_depth=3, learning_rate=0.05,
@@ -273,7 +273,7 @@ def train_models(feat, all_feature_cols, baseline_feature_cols):
     enhanced_mid.fit(X_tr[all_feature_cols], y_tr,
                      eval_set=[(X_val[all_feature_cols], y_val)], verbose=False)
     models["enhanced_mid"] = (enhanced_mid, all_feature_cols)
-    print("  Enhanced mid ✓  (迭代: " + str(enhanced_mid.best_iteration) + ")")
+    print("  Enhanced mid OK (迭代: " + str(enhanced_mid.best_iteration) + ")")
 
     # ── 评估 ───────────────────────────────────────────────────────────────
     mid_model, cols = models["enhanced_mid"]

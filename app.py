@@ -730,6 +730,55 @@ def get_predictions():
 pred_df = get_predictions()
 
 
+def _to_float(v, d=0.0):
+    try:
+        x = float(v)
+        return x if np.isfinite(x) else d
+    except Exception:
+        return d
+
+@st.cache_data
+def get_integrated_output(_feat):
+    """全量数据门控+极端情景综合输出。返回DataFrame含integrated_mid/low/high/extreme_active。"""
+    from extreme_scenario import get_extreme_prediction
+    result = []
+    for idx, row in _feat.iterrows():
+        vix_val = _to_float(row.get("VIX", 20), 20.0)
+        vol_r = _to_float(row.get("vol_ratio", 1), 1.0)
+        hormuz_z = abs(_to_float(row.get("hormuz_tanker_zscore", 0), 0.0))
+        geo_flag = _to_float(row.get("geopolitics_flag", 0), 0.0)
+        gdelt_ci = _to_float(row.get("gdelt_conflict_intensity", 0), 0.0)
+
+        is_extreme = (vol_r > 2.0 or vix_val > 30 or hormuz_z > 2.0 or
+                      (geo_flag > 0 and gdelt_ci < -4.0))
+
+        if is_extreme and idx in pred_df.index:
+            low = _to_float(pred_df.loc[idx, "pred_enhanced_low"], -0.05)
+            mid = _to_float(pred_df.loc[idx, "pred_enhanced_mid"], 0.0)
+            high = _to_float(pred_df.loc[idx, "pred_enhanced_high"], 0.05)
+            ext = get_extreme_prediction(row, low, mid, high)
+            result.append({
+                "integrated_mid": ext["pred_mid"],
+                "integrated_low": ext["pred_low"],
+                "integrated_high": ext["pred_high"],
+                "extreme_active": True,
+            })
+        else:
+            result.append({
+                "integrated_mid": _to_float(pred_df.loc[idx, "pred_enhanced_mid"], 0.0) if idx in pred_df.index else 0.0,
+                "integrated_low": _to_float(pred_df.loc[idx, "pred_enhanced_low"], -0.05) if idx in pred_df.index else -0.05,
+                "integrated_high": _to_float(pred_df.loc[idx, "pred_enhanced_high"], 0.05) if idx in pred_df.index else 0.05,
+                "extreme_active": False,
+            })
+    df = pd.DataFrame(result, index=_feat.index)
+    df["target"] = _feat["target"]
+    df["WTI"] = _feat["WTI"]
+    return df
+
+
+integrated_df = get_integrated_output(feat)
+
+
 def infer_extreme_start(feature_df):
     """从咽喉点、波动率和地缘政治信号自动推断极端期起点。"""
     if feature_df is None or len(feature_df) == 0:
@@ -2513,7 +2562,7 @@ elif page == "风险预测":
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "历史回测":
     st.title("历史回测")
-    st.caption("2020年至今 WTI 油价走势与模型预测表现")
+    st.caption("双层综合输出：极端情景激活时自动调用第二层修正预测")
 
     CRISIS_EVENTS = [
         {"date": "2020-03-09", "label": "新冠+油价战争", "color": "#e74c3c",
@@ -2524,20 +2573,18 @@ elif page == "历史回测":
          "logic": "地缘风险溢价短暂上升 → 实际供应未中断 → 需求侧走弱主导 → 价格两周内回落"},
         {"date": "2025-01-20", "label": "特朗普就职",    "color": "#2980b9",
          "logic": "关税政策不确定性 → 全球需求预期下调 → 美元走强压制油价 → WTI持续承压"},
+        {"date": "2026-02-16", "label": "霍尔木兹封锁",  "color": "#e74c3c",
+         "logic": "伊朗封锁霍尔木兹海峡 → 全球20%石油贸易中断 → 第二层极端情景自动激活"},
     ]
 
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("开始日期", value=pd.Timestamp("2020-01-01"))
     with col2:
-        end_date = st.date_input("结束日期", value=pred_df.index[-1])
+        end_date = st.date_input("结束日期", value=integrated_df.index[-1])
 
-    filtered = pred_df.loc[str(start_date):str(end_date)]
-    return_cols = [
-        "pred_enhanced_low", "pred_enhanced_high",
-        "pred_baseline_mid", "pred_enhanced_mid", "target",
-    ]
-    return_values = filtered[[c for c in return_cols if c in filtered.columns]].replace(
+    filtered = integrated_df.loc[str(start_date):str(end_date)]
+    return_values = filtered[["integrated_low", "integrated_high", "integrated_mid", "target"]].replace(
         [np.inf, -np.inf], np.nan
     ).stack()
     if len(return_values) > 0:
@@ -2558,21 +2605,15 @@ elif page == "历史回测":
 
     fig.add_trace(go.Scatter(
         x=list(filtered.index) + list(filtered.index[::-1]),
-        y=list(filtered["pred_enhanced_high"]) + list(filtered["pred_enhanced_low"][::-1]),
-        fill="toself", fillcolor="rgba(52,152,219,0.2)",
-        line=dict(color="rgba(0,0,0,0)"), name="风险区间"
+        y=list(filtered["integrated_high"]) + list(filtered["integrated_low"][::-1]),
+        fill="toself", fillcolor="rgba(39,174,96,0.15)",
+        line=dict(color="rgba(0,0,0,0)"), name="综合风险区间 P10~P90"
     ), row=2, col=1)
 
     fig.add_trace(go.Scatter(
-        x=filtered.index, y=filtered["pred_baseline_mid"],
-        name="主预测中位数（Baseline）",
-        line=dict(color="#3498db", width=1.5)
-    ), row=2, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=filtered.index, y=filtered["pred_enhanced_mid"],
-        name="参考中位数（Enhanced）",
-        line=dict(color="#95a5a6", width=1, dash="dash")
+        x=filtered.index, y=filtered["integrated_mid"],
+        name="综合输出（P50）",
+        line=dict(color="#27ae60", width=1.8)
     ), row=2, col=1)
 
     fig.add_trace(go.Scatter(
@@ -2581,7 +2622,21 @@ elif page == "历史回测":
         line=dict(color="#e74c3c", width=0.8), opacity=0.6
     ), row=2, col=1)
 
-    # 危机事件标注
+    # 极端期背景着色
+    if "extreme_active" in filtered.columns:
+        ea = filtered["extreme_active"].fillna(False).astype(bool)
+        in_ext = False; ext_start = None
+        for i, (ts, is_e) in enumerate(zip(filtered.index, ea)):
+            if is_e and not in_ext:
+                ext_start = ts; in_ext = True
+            elif not is_e and in_ext:
+                fig.add_vrect(x0=ext_start, x1=filtered.index[i-1],
+                              fillcolor="rgba(231,76,60,0.06)", layer="below", line_width=0, row="all")
+                in_ext = False
+        if in_ext:
+            fig.add_vrect(x0=ext_start, x1=filtered.index[-1],
+                          fillcolor="rgba(231,76,60,0.06)", layer="below", line_width=0, row="all")
+
     for event in CRISIS_EVENTS:
         edate = pd.Timestamp(event["date"])
         if pd.Timestamp(start_date) <= edate <= pd.Timestamp(end_date):
@@ -2598,7 +2653,7 @@ elif page == "历史回测":
     fig.update_yaxes(gridcolor="#2d3748", title_text="未来10日涨跌幅", tickformat=".0%", range=return_axis_range, row=2, col=1)
     fig.update_xaxes(gridcolor="#2d3748")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("为保证可读性，下方涨跌幅图按2%-98%分位做坐标裁剪；2020年负油价等极端离群点仍保留在数据中，但不拉伸整张图。")
+    st.caption("绿色 = 综合输出（门控+极端情景） | 红色 = 实际涨跌 | 红底色 = 极端期 | 区间 = P10~P90")
 
     st.divider()
 
