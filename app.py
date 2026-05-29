@@ -759,17 +759,27 @@ def get_integrated_output(_feat):
             mid = _to_float(pred_df.loc[idx, "pred_enhanced_mid"], 0.0)
             high = _to_float(pred_df.loc[idx, "pred_enhanced_high"], 0.05)
             ext = get_extreme_prediction(row, low, mid, high)
+            e_low, e_mid, e_high = ext["pred_low"], ext["pred_mid"], ext["pred_high"]
+            # 强制分位数单调：P10 ≤ P50 ≤ P90
+            e_low, e_mid, e_high = sorted([e_low, e_mid, e_high])
             result.append({
-                "integrated_mid": ext["pred_mid"],
-                "integrated_low": ext["pred_low"],
-                "integrated_high": ext["pred_high"],
+                "integrated_mid": e_mid,
+                "integrated_low": e_low,
+                "integrated_high": e_high,
                 "extreme_active": True,
             })
         else:
+            # 正常期用 baseline_mid（OOS方向准确率更稳）
+            b_mid  = _to_float(pred_df.loc[idx, "pred_baseline_mid"], 0.0)  if idx in pred_df.index else 0.0
+            e_low  = _to_float(pred_df.loc[idx, "pred_enhanced_low"], -0.05) if idx in pred_df.index else -0.05
+            e_high = _to_float(pred_df.loc[idx, "pred_enhanced_high"], 0.05) if idx in pred_df.index else 0.05
+            # 强制分位数单调：区间必须包含 mid
+            e_low  = min(e_low,  b_mid)
+            e_high = max(e_high, b_mid)
             result.append({
-                "integrated_mid": _to_float(pred_df.loc[idx, "pred_enhanced_mid"], 0.0) if idx in pred_df.index else 0.0,
-                "integrated_low": _to_float(pred_df.loc[idx, "pred_enhanced_low"], -0.05) if idx in pred_df.index else -0.05,
-                "integrated_high": _to_float(pred_df.loc[idx, "pred_enhanced_high"], 0.05) if idx in pred_df.index else 0.05,
+                "integrated_mid": b_mid,
+                "integrated_low": e_low,
+                "integrated_high": e_high,
                 "extreme_active": False,
             })
     df = pd.DataFrame(result, index=_feat.index)
