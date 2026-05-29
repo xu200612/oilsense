@@ -719,6 +719,18 @@ def get_realtime_price():
 feat, model_feature_map, models, importance, sentiment, news, direction_model, direction_feature_cols = load_assets()
 
 
+@st.cache_data(ttl=3600)
+def load_shap_assets():
+    """加载 SHAP 解释 CSV（由 shap_explain.py 生成），文件不存在时返回空 DataFrame。"""
+    keys = ["global", "current", "matrix", "group"]
+    names = ["shap_global.csv", "shap_current.csv", "shap_matrix.csv", "shap_group_matrix.csv"]
+    out = {}
+    for key, name in zip(keys, names):
+        path = os.path.join(ROOT_DIR, "data", "processed", name)
+        out[key] = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
+    return out
+
+
 @st.cache_data
 def get_predictions():
     pred_df = pd.DataFrame(index=feat.index)
@@ -2642,6 +2654,83 @@ elif page == "风险预测":
     )
     st.plotly_chart(fig2, use_container_width=True, key="chart_importance")
     st.caption("🔴 红色 = LLM情感/GDELT地缘政治因子  🔵 蓝色 = 传统量化因子")
+
+    # ── SHAP 因子贡献解释 ─────────────────────────────────────────────────
+    _shap = load_shap_assets()
+    _shap_cur   = _shap.get("current", pd.DataFrame())
+    _shap_mat   = _shap.get("matrix", pd.DataFrame())
+    _shap_grp   = _shap.get("group", pd.DataFrame())
+
+    if not _shap_cur.empty:
+        st.divider()
+        st.subheader("SHAP 因子贡献解释（TreeSHAP）")
+        _asof    = str(_shap_cur.get("asof_date", pd.Series([""])).iloc[0])
+        _pred_shap = float(_shap_cur.get("prediction_mid", pd.Series([0])).iloc[0])
+        st.caption(
+            "TreeSHAP 将当前 Enhanced XGBoost 预测拆解为各因子贡献。"
+            "正值（红色）推高油价预测，负值（蓝色）拉低油价预测。"
+            f"  解释日期：{_asof}  ｜  SHAP 综合预测：{_pred_shap*100:+.2f}%"
+        )
+        _top = _shap_cur.sort_values("abs_shap", ascending=False).head(12)
+        _sc1, _sc2 = st.columns([1.05, 1.25])
+        with _sc1:
+            _colors = ["#d94848" if v >= 0 else "#2f80ed" for v in _top["shap_value"]]
+            _fig_cur = go.Figure(go.Bar(
+                x=(_top["shap_value"][::-1] * 100).values,
+                y=_top["feature"][::-1].values,
+                orientation="h",
+                marker=dict(color=_colors[::-1]),
+                text=[f"{v*100:+.2f}%" for v in _top["shap_value"][::-1]],
+                textposition="outside",
+            ))
+            _fig_cur.update_layout(
+                height=430, margin=dict(l=0, r=70, t=10, b=0),
+                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+                font=dict(color="white"),
+                xaxis=dict(gridcolor="#2d3748", title="对预测的贡献（百分点）"),
+                yaxis=dict(gridcolor="#2d3748"),
+            )
+            st.plotly_chart(_fig_cur, use_container_width=True, key="chart_shap_current")
+
+        with _sc2:
+            if not _shap_mat.empty:
+                _mat = _shap_mat.copy()
+                _mat["date"] = pd.to_datetime(_mat["date"]).dt.strftime("%m-%d")
+                _z = _mat.drop(columns=["date"]).T * 100
+                _fig_heat = go.Figure(go.Heatmap(
+                    z=_z.values, x=_mat["date"], y=_z.index,
+                    colorscale=[[0.0, "#1d4ed8"], [0.5, "#111827"], [1.0, "#dc2626"]],
+                    zmid=0,
+                    colorbar=dict(title="pp"),
+                    hovertemplate="日期=%{x}<br>因子=%{y}<br>贡献=%{z:.2f}pp<extra></extra>",
+                ))
+                _fig_heat.update_layout(
+                    height=430, margin=dict(l=0, r=20, t=10, b=0),
+                    plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+                    font=dict(color="white"),
+                    xaxis=dict(showgrid=False, tickangle=-35),
+                    yaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(_fig_heat, use_container_width=True, key="chart_shap_matrix")
+
+        if not _shap_grp.empty:
+            _grp = _shap_grp.copy()
+            _grp["date"] = pd.to_datetime(_grp["date"]).dt.strftime("%m-%d")
+            _gz = _grp.drop(columns=["date"]).T * 100
+            _fig_grp = go.Figure(go.Heatmap(
+                z=_gz.values, x=_grp["date"], y=_gz.index,
+                colorscale=[[0.0, "#1d4ed8"], [0.5, "#111827"], [1.0, "#dc2626"]],
+                zmid=0,
+                colorbar=dict(title="pp"),
+            ))
+            _fig_grp.update_layout(
+                height=220, margin=dict(l=0, r=20, t=6, b=0),
+                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+                font=dict(color="white"),
+                xaxis=dict(showgrid=False, tickangle=-35),
+                yaxis=dict(showgrid=False),
+            )
+            st.plotly_chart(_fig_grp, use_container_width=True, key="chart_shap_group")
 
 # ══════════════════════════════════════════════════════════════════════════
 # 页面四：历史回测

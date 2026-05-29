@@ -967,6 +967,26 @@ def update_feature_matrix():
         print(f"  失败: {e}")
 
 
+def update_shipping():
+    """ShipFinder/VesselAPI 双源 AIS 实时快照（API Key 未配置时自动跳过）"""
+    print("\n[AIS实时] ShipFinder/VesselAPI 航运快照...")
+    try:
+        from shipping_sources import fetch_realtime_shipping_snapshot
+        fetch_realtime_shipping_snapshot()
+    except Exception as e:
+        print(f"  ShipFinder/VesselAPI 跳过: {e}")
+
+
+def update_shap():
+    """TreeSHAP 因子贡献计算（生成展示用 CSV，失败不影响主流程）"""
+    print("\n[SHAP] 更新因子归因解释...")
+    try:
+        from shap_explain import compute_shap_outputs
+        compute_shap_outputs()
+    except Exception as e:
+        print(f"  SHAP 更新失败: {e}")
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 入口
 # ══════════════════════════════════════════════════════════════════════════
@@ -983,7 +1003,9 @@ def run_update():
     update_portwatch()
     update_country_production_data()
     update_feature_matrix()
-    # AIS单独手动跑，不在自动流程里（耗时120秒）
+    update_shipping()   # ShipFinder/VesselAPI（API Key 未配置时跳过）
+    update_shap()       # TreeSHAP 因子归因（依赖 feature_matrix 更新后运行）
+    # 原 AIS WebSocket（耗时120秒，手动跑）
     # update_ais()
     print("\n" + "="*50)
     print("全部更新完成！")
