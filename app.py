@@ -533,6 +533,16 @@ def load_assets():
         os.path.join(ROOT_DIR, "data", "processed", "feature_matrix.csv"),
         index_col=0, parse_dates=True
     )
+    # 追加近期无label行（target=NaN），用于回测展示延伸到今日，不参与训练
+    _recent_path = os.path.join(ROOT_DIR, "data", "processed", "recent_features.csv")
+    if os.path.exists(_recent_path):
+        try:
+            _recent = pd.read_csv(_recent_path, index_col=0, parse_dates=True)
+            _new = _recent[~_recent.index.isin(feat.index)]
+            if len(_new) > 0:
+                feat = pd.concat([feat, _new]).sort_index()
+        except Exception:
+            pass
     model_feature_map = joblib.load(
         os.path.join(ROOT_DIR, "models", "model_feature_map.pkl")
     )
