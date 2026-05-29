@@ -96,11 +96,11 @@ EXTREME_EVENTS = [
     {
         "name"       : "霍尔木兹封锁",
         "start"      : "2026-02-16",
-        "peak"       : "2026-02-27",
-        "end"        : "2026-03-15",
+        "peak"       : "2026-04-07",
+        "end"        : "2026-05-31",
         "trigger"    : "geopolitics",
-        "description": "伊朗封锁霍尔木兹海峡，全球20%石油贸易中断，油价持续飙升",
-        "typical_30d": 0.35,
+        "description": "伊朗封锁霍尔木兹海峡，全球20%石油贸易中断，WTI从$63升至$114峰值，封锁持续中",
+        "typical_30d": 0.45,
         "severity"   : "extreme",
     },
 

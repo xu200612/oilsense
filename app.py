@@ -743,13 +743,15 @@ def get_integrated_output(_feat):
     from extreme_scenario import get_extreme_prediction
     result = []
     for idx, row in _feat.iterrows():
-        vix_val = _to_float(row.get("VIX", 20), 20.0)
-        vol_r = _to_float(row.get("vol_ratio", 1), 1.0)
-        hormuz_z = abs(_to_float(row.get("hormuz_tanker_zscore", 0), 0.0))
-        geo_flag = _to_float(row.get("geopolitics_flag", 0), 0.0)
-        gdelt_ci = _to_float(row.get("gdelt_conflict_intensity", 0), 0.0)
+        vix_val        = _to_float(row.get("VIX", 20), 20.0)
+        vol_r          = _to_float(row.get("vol_ratio", 1), 1.0)
+        hormuz_z       = abs(_to_float(row.get("hormuz_tanker_zscore", 0), 0.0))
+        hormuz_blocked = _to_float(row.get("hormuz_blocked", 0), 0.0)
+        geo_flag       = _to_float(row.get("geopolitics_flag", 0), 0.0)
+        gdelt_ci       = _to_float(row.get("gdelt_conflict_intensity", 0), 0.0)
 
         is_extreme = (vol_r > 2.0 or vix_val > 30 or hormuz_z > 2.0 or
+                      hormuz_blocked > 0 or
                       (geo_flag > 0 and gdelt_ci < -4.0))
 
         if is_extreme and idx in pred_df.index:
@@ -2642,6 +2644,12 @@ elif page == "历史回测":
         if pd.Timestamp(start_date) <= edate <= pd.Timestamp(end_date):
             add_vertical_marker(fig, edate, text=event["label"], color=event["color"])
 
+    # 训练截止线：区分 in-sample 与真实 OOS
+    _cutoff_ts = pd.Timestamp("2026-01-01")
+    if pd.Timestamp(start_date) <= _cutoff_ts <= pd.Timestamp(end_date):
+        add_vertical_marker(fig, _cutoff_ts, text="← 训练期 | 样本外 →",
+                            color="#7f8c8d", dash="dot")
+
     fig.update_layout(
         height=640, margin=dict(l=0, r=0, t=82, b=0),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
@@ -2732,12 +2740,14 @@ elif page == "历史回测":
     st.subheader("危机事件窗口分析")
     selected_event = st.selectbox(
         "选择事件",
-        ["俄乌冲突爆发(2022-02-24)",
+        ["霍尔木兹封锁(2026-02-16)",
+         "俄乌冲突爆发(2022-02-24)",
          "以哈冲突爆发(2023-10-07)",
          "特朗普就职(2025-01-20)"]
     )
 
     event_map = {
+        "霍尔木兹封锁(2026-02-16)": ("2026-02-16", "#e74c3c"),
         "俄乌冲突爆发(2022-02-24)": ("2022-02-24", "#e67e22"),
         "以哈冲突爆发(2023-10-07)": ("2023-10-07", "#9b59b6"),
         "特朗普就职(2025-01-20)":   ("2025-01-20", "#2980b9"),
@@ -2745,28 +2755,67 @@ elif page == "历史回测":
     ev_date, ev_color = event_map[selected_event]
     ev_ts    = pd.Timestamp(ev_date)
     ev_start = ev_ts - pd.Timedelta(days=30)
-    ev_end   = ev_ts + pd.Timedelta(days=45)
-    ev_data  = pred_df.loc[ev_start:ev_end]
+    ev_end   = ev_ts + pd.Timedelta(days=60)
+
+    _is_hormuz = selected_event.startswith("霍尔木兹")
 
     fig3 = go.Figure()
-    fig3.add_trace(go.Scatter(
-        x=list(ev_data.index) + list(ev_data.index[::-1]),
-        y=list(ev_data["pred_enhanced_high"]) + list(ev_data["pred_enhanced_low"][::-1]),
-        fill="toself", fillcolor="rgba(52,152,219,0.25)",
-        line=dict(color="rgba(0,0,0,0)"), name="风险区间"
-    ))
-    fig3.add_trace(go.Scatter(
-        x=ev_data.index, y=ev_data["pred_baseline_mid"],
-        name="主预测中位数（Baseline）", line=dict(color="#3498db", width=2)
-    ))
-    fig3.add_trace(go.Scatter(
-        x=ev_data.index, y=ev_data["pred_enhanced_mid"],
-        name="Enhanced参考中位数", line=dict(color="#95a5a6", width=1.5, dash="dash")
-    ))
-    fig3.add_trace(go.Scatter(
-        x=ev_data.index, y=ev_data["target"],
-        name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5)
-    ))
+
+    if _is_hormuz:
+        # 霍尔木兹：OOS 事件，展示综合输出（双层架构）
+        ev_data = integrated_df.loc[ev_start:ev_end]
+        fig3.add_trace(go.Scatter(
+            x=list(ev_data.index) + list(ev_data.index[::-1]),
+            y=list(ev_data["integrated_high"]) + list(ev_data["integrated_low"][::-1]),
+            fill="toself", fillcolor="rgba(39,174,96,0.20)",
+            line=dict(color="rgba(0,0,0,0)"), name="综合风险区间 P10~P90"
+        ))
+        fig3.add_trace(go.Scatter(
+            x=ev_data.index, y=ev_data["integrated_mid"],
+            name="综合输出 P50（双层架构）", line=dict(color="#27ae60", width=2)
+        ))
+        fig3.add_trace(go.Scatter(
+            x=ev_data.index, y=ev_data["target"],
+            name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5)
+        ))
+        # 极端期背景
+        if "extreme_active" in ev_data.columns:
+            ea = ev_data["extreme_active"].fillna(False).astype(bool)
+            in_ext = False; ext_s = None
+            for i, (ts, is_e) in enumerate(zip(ev_data.index, ea)):
+                if is_e and not in_ext:
+                    ext_s = ts; in_ext = True
+                elif not is_e and in_ext:
+                    fig3.add_vrect(x0=ext_s, x1=ev_data.index[i-1],
+                                   fillcolor="rgba(231,76,60,0.08)", layer="below", line_width=0)
+                    in_ext = False
+            if in_ext:
+                fig3.add_vrect(x0=ext_s, x1=ev_data.index[-1],
+                               fillcolor="rgba(231,76,60,0.08)", layer="below", line_width=0)
+        st.caption("样本外真实事件 | 绿色 = 综合输出（第一层＋极端期第二层接管） | 红底色 = 极端期激活")
+    else:
+        # 训练集内事件：展示 XGBoost 双模型原始输出
+        ev_data = pred_df.loc[ev_start:ev_end]
+        fig3.add_trace(go.Scatter(
+            x=list(ev_data.index) + list(ev_data.index[::-1]),
+            y=list(ev_data["pred_enhanced_high"]) + list(ev_data["pred_enhanced_low"][::-1]),
+            fill="toself", fillcolor="rgba(52,152,219,0.25)",
+            line=dict(color="rgba(0,0,0,0)"), name="风险区间"
+        ))
+        fig3.add_trace(go.Scatter(
+            x=ev_data.index, y=ev_data["pred_baseline_mid"],
+            name="主预测中位数（Baseline）", line=dict(color="#3498db", width=2)
+        ))
+        fig3.add_trace(go.Scatter(
+            x=ev_data.index, y=ev_data["pred_enhanced_mid"],
+            name="Enhanced参考中位数", line=dict(color="#95a5a6", width=1.5, dash="dash")
+        ))
+        fig3.add_trace(go.Scatter(
+            x=ev_data.index, y=ev_data["target"],
+            name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5)
+        ))
+        st.caption("训练集内事件 | 蓝色 = XGBoost 预测 | 红色 = 实际涨跌")
+
     add_vertical_marker(fig3, pd.Timestamp(ev_date), color=ev_color)
     fig3.add_hline(y=0, line_color="white", line_width=0.8)
     fig3.update_layout(
