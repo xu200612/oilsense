@@ -2445,27 +2445,38 @@ elif page == "风险预测":
         f"当前起点：{bs_start.date()}（{bs_start_reason}）"
     )
 
-    recent = pred_df.tail(60)
+    # 用 integrated_df 而非 pred_df：门控后综合输出与回测页一致
+    recent = integrated_df.tail(60)
     fig    = go.Figure()
     fig.add_trace(go.Scatter(
         x=list(recent.index) + list(recent.index[::-1]),
-        y=list(recent["pred_enhanced_high"]) + list(recent["pred_enhanced_low"][::-1]),
-        fill="toself", fillcolor="rgba(52,152,219,0.15)",
+        y=list(recent["integrated_high"]) + list(recent["integrated_low"][::-1]),
+        fill="toself", fillcolor="rgba(39,174,96,0.15)",
         line=dict(color="rgba(0,0,0,0)"), name="风险区间 P10~P90"
     ))
     fig.add_trace(go.Scatter(
-        x=recent.index, y=recent["pred_baseline_mid"],
-        name="主预测（Baseline P50）", line=dict(color="#3498db", width=2)
-    ))
-    fig.add_trace(go.Scatter(
-        x=recent.index, y=recent["pred_enhanced_mid"],
-        name="Enhanced参考（P50）", line=dict(color="#95a5a6", width=1.5, dash="dash")
+        x=recent.index, y=recent["integrated_mid"],
+        name="综合预测 P50（门控+情景匹配）", line=dict(color="#27ae60", width=2)
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["target"],
         name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5), opacity=0.8
     ))
     fig.add_hline(y=0, line_dash="solid", line_color="rgba(255,255,255,0.3)", line_width=1)
+    # 极端期红色背景
+    if "extreme_active" in recent.columns:
+        _ea = recent["extreme_active"].fillna(False).astype(bool)
+        _in_ext = False; _ext_s = None
+        for _i, (_ts, _ie) in enumerate(zip(recent.index, _ea)):
+            if _ie and not _in_ext:
+                _ext_s = _ts; _in_ext = True
+            elif not _ie and _in_ext:
+                fig.add_vrect(x0=_ext_s, x1=recent.index[_i-1],
+                              fillcolor="rgba(231,76,60,0.08)", layer="below", line_width=0)
+                _in_ext = False
+        if _in_ext:
+            fig.add_vrect(x0=_ext_s, x1=recent.index[-1],
+                          fillcolor="rgba(231,76,60,0.08)", layer="below", line_width=0)
     add_vertical_band(fig, bs_start, recent.index[-1], text="黑天鹅期间")
     fig.update_layout(
         height=420, margin=dict(l=0, r=0, t=10, b=0),
