@@ -801,6 +801,59 @@ def get_integrated_output(_feat):
 integrated_df = get_integrated_output(feat)
 
 
+@st.cache_data
+def get_backtest_metrics(_integrated_df, _pred_df):
+    """计算验证集和OOS回测绩效指标，供回测页面展示。"""
+    CUTOFF = pd.Timestamp("2026-01-01")
+
+    # 训练截止前数据，取后20%作为验证集（与 train_model.py 一致）
+    pre_cutoff = _integrated_df[_integrated_df.index < CUTOFF]
+    split_idx  = int(len(pre_cutoff) * 0.8)
+    val_df     = pre_cutoff.iloc[split_idx:]
+    oos_df     = _integrated_df[_integrated_df.index >= CUTOFF]
+
+    def _compute(df):
+        t  = df["target"].dropna()
+        if len(t) == 0:
+            return {}
+        p  = df["integrated_mid"].loc[t.index]
+        lo = df["integrated_low"].loc[t.index]
+        hi = df["integrated_high"].loc[t.index]
+
+        dir_acc  = float((np.sign(p) == np.sign(t)).mean())
+        mae      = float(np.abs(p - t).mean())
+        rmse     = float(np.sqrt(((p - t) ** 2).mean()))
+        coverage = float(((t >= lo) & (t <= hi)).mean())
+
+        sig_mask = np.abs(p) > 0.01
+        sig_acc  = float((np.sign(p[sig_mask]) == np.sign(t[sig_mask])).mean()) if sig_mask.sum() > 0 else float("nan")
+
+        # 策略最大回撤（按信号做多/做空，忽略成本）
+        strat     = pd.Series(np.sign(p.values) * t.values)
+        cum       = (1 + strat).cumprod()
+        mdd       = float(((cum - cum.expanding().max()) / cum.expanding().max()).min())
+
+        extreme_n = int(df.loc[t.index, "extreme_active"].fillna(False).sum()) if "extreme_active" in df.columns else 0
+
+        return dict(
+            n         = len(t),
+            dir_acc   = dir_acc,
+            sig_acc   = sig_acc,
+            mae       = mae,
+            rmse      = rmse,
+            coverage  = coverage,
+            mdd       = mdd,
+            extreme_n = extreme_n,
+            start     = str(t.index[0].date()),
+            end       = str(t.index[-1].date()),
+        )
+
+    return {"val": _compute(val_df), "oos": _compute(oos_df)}
+
+
+_bt_metrics = get_backtest_metrics(integrated_df, pred_df)
+
+
 def infer_extreme_start(feature_df):
     """从咽喉点、波动率和地缘政治信号自动推断极端期起点。"""
     if feature_df is None or len(feature_df) == 0:
@@ -2585,6 +2638,75 @@ elif page == "风险预测":
 elif page == "历史回测":
     st.title("历史回测")
     st.caption("双层综合输出：极端情景激活时自动调用第二层修正预测")
+
+    # ── 绩效指标概览 ──────────────────────────────────────────────────────
+    _vm = _bt_metrics.get("val", {})
+    _om = _bt_metrics.get("oos", {})
+
+    def _pct(v, decimals=1):
+        return f"{v*100:.{decimals}f}%" if isinstance(v, float) and not (v != v) else "N/A"
+
+    _card_css = (
+        "background:rgba(255,255,255,0.04);border-radius:10px;"
+        "padding:14px 16px;margin-bottom:4px;"
+    )
+    _good  = "#27ae60"
+    _warn  = "#e67e22"
+    _bad   = "#e74c3c"
+    _gray  = "#95a5a6"
+
+    def _color_dir(v):
+        if not isinstance(v, float) or v != v: return _gray
+        return _good if v >= 0.55 else (_warn if v >= 0.50 else _bad)
+
+    def _color_cov(v):
+        if not isinstance(v, float) or v != v: return _gray
+        return _good if v >= 0.75 else (_warn if v >= 0.65 else _bad)
+
+    st.markdown("#### 模型绩效概览")
+    _col_v, _col_o = st.columns(2)
+
+    with _col_v:
+        _n = _vm.get("n", 0)
+        _s, _e = _vm.get("start","—"), _vm.get("end","—")
+        st.markdown(
+            f"<div style='{_card_css}border-left:4px solid {_good};'>"
+            f"<span style='color:{_good};font-weight:700;font-size:13px;'>验证集 OOS</span>"
+            f"<span style='color:#888;font-size:11px;margin-left:8px;'>{_s} ~ {_e}（n={_n}）</span></div>",
+            unsafe_allow_html=True
+        )
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("方向准确率", _pct(_vm.get("dir_acc")))
+        _c2.metric("MAE", _pct(_vm.get("mae"), 2))
+        _c3.metric("P10-P90覆盖", _pct(_vm.get("coverage")))
+        _c4, _c5, _c6 = st.columns(3)
+        _c4.metric("信号准确率", _pct(_vm.get("sig_acc")))
+        _c5.metric("RMSE", _pct(_vm.get("rmse"), 2))
+        _c6.metric("最大回撤", _pct(_vm.get("mdd")))
+
+    with _col_o:
+        _n2 = _om.get("n", 0)
+        _s2, _e2 = _om.get("start","—"), _om.get("end","—")
+        _ex2 = _om.get("extreme_n", 0)
+        st.markdown(
+            f"<div style='{_card_css}border-left:4px solid {_warn};'>"
+            f"<span style='color:{_warn};font-weight:700;font-size:13px;'>真实样本外 2026+</span>"
+            f"<span style='color:#888;font-size:11px;margin-left:8px;'>{_s2} ~ {_e2}（n={_n2}）</span></div>",
+            unsafe_allow_html=True
+        )
+        _d1, _d2, _d3 = st.columns(3)
+        _d1.metric("方向准确率", _pct(_om.get("dir_acc")))
+        _d2.metric("MAE", _pct(_om.get("mae"), 2))
+        _d3.metric("P10-P90覆盖", _pct(_om.get("coverage")))
+        _d4, _d5, _d6 = st.columns(3)
+        _d4.metric("信号准确率", _pct(_om.get("sig_acc")))
+        _d5.metric("RMSE", _pct(_om.get("rmse"), 2))
+        _d6.metric("最大回撤", _pct(_om.get("mdd")))
+        if _n2 > 0:
+            st.caption(f"第二层（极端情景）激活 {_ex2}/{_n2} 天（{_ex2/_n2*100:.0f}%）｜"
+                       "2026+ 为霍尔木兹封锁期，XGBoost 退出，由情景匹配主导")
+
+    st.divider()
 
     CRISIS_EVENTS = [
         {"date": "2020-03-09", "label": "新冠+油价战争", "color": "#e74c3c",
