@@ -762,6 +762,7 @@ def get_integrated_output(_feat):
 
         is_extreme = (vol_r > 2.0 or vix_val > 30 or hormuz_z > 2.0 or
                       hormuz_blocked > 0 or
+                      gdelt_ci < -6.5 or
                       (geo_flag > 0 and gdelt_ci < -4.0))
 
         if is_extreme and idx in pred_df.index:

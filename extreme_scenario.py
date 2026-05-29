@@ -352,18 +352,23 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
     激活条件：高波动 或 VIX恐慌 或 航运异常
     输出：调整后的10日置信区间 + 30日情景路径 + 相似历史事件
     """
-    vol_ratio = float(current_features.get("vol_ratio", 1))
-    vix       = float(current_features.get("VIX", 20))
-    hormuz_z  = float(current_features.get("hormuz_tanker_zscore", 0))
-    geo_flag  = float(current_features.get("geopolitics_flag", 0))
-    gdelt_ci  = float(current_features.get("gdelt_conflict_intensity", 0))
+    vol_ratio       = float(current_features.get("vol_ratio", 1))
+    vix             = float(current_features.get("VIX", 20))
+    hormuz_z        = float(current_features.get("hormuz_tanker_zscore", 0))
+    hormuz_blocked  = float(current_features.get("hormuz_blocked", 0))
+    geo_flag        = float(current_features.get("geopolitics_flag", 0))
+    gdelt_ci        = float(current_features.get("gdelt_conflict_intensity", 0))
 
     # 激活条件（任意一个触发）
+    # hormuz_blocked=1 与 get_integrated_output 保持一致，避免外层触发但内层不激活导致情景匹配跳过
+    # gdelt_ci < -6.5（不要求 geo_flag）覆盖极端冲突强度的预封锁期
     is_extreme = force_activate or (
-        vol_ratio      > 2.0  or
-        vix            > 30   or
-        abs(hormuz_z)  > 2.0  or
-        (geo_flag > 0 and gdelt_ci < -4.0)   # 极端地缘冲突
+        vol_ratio       > 2.0  or
+        vix             > 30   or
+        abs(hormuz_z)   > 2.0  or
+        hormuz_blocked  > 0    or
+        gdelt_ci        < -6.5 or          # 极端冲突强度，无需 geo_flag
+        (geo_flag > 0 and gdelt_ci < -4.0) # 有地缘信号时阈值放宽
     )
 
     if not is_extreme:
