@@ -100,7 +100,12 @@ def parse_md(text, styles):
             ("ALIGN",       (0,0), (-1,-1), "LEFT"),
             ("VALIGN",      (0,0), (-1,-1), "MIDDLE"),
         ])
-        tbl_data = [[Paragraph(cell, styles["body"]) for cell in row] for row in data]
+        def _esc(s):
+            s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+            s = re.sub(r"`(.+?)`", r'<font name="Courier" size="8.5">\1</font>', s)
+            return s
+        tbl_data = [[Paragraph(_esc(cell), styles["body"]) for cell in row] for row in data]
         tbl = Table(tbl_data, colWidths=[col_w]*col_n, repeatRows=1)
         tbl.setStyle(ts)
         story.append(tbl)
@@ -173,6 +178,7 @@ def parse_md(text, styles):
 
         # 强调和内联格式转换
         def inline(t):
+            t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
             t = re.sub(r"`(.+?)`", r'<font name="Courier" size="8.5">\1</font>', t)
             t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", t)
