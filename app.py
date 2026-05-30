@@ -1297,14 +1297,8 @@ try:
         similar_events = extreme_result.get("similar_events", [])
         scenarios_30d  = extreme_result.get("scenarios_30d", {})
         trigger_type   = extreme_result.get("trigger_type", "geopolitics")
-
-        # 霍尔木兹封锁强制修正方向
-        _hormuz_z = safe_float(_latest.get("hormuz_tanker_zscore", 0), 0.0)
-        _cp6      = safe_float(_latest.get("cp6_tanker", 999), 999.0)
-        if is_black_swan and (abs(_hormuz_z) > 1.5 or _cp6 < 5):
-            last_mid  = abs(last_mid)  if last_mid  < 0 else last_mid
-            last_high = abs(last_high) if last_high < 0 else last_high
-            scenarios_30d = {k: abs(v) if v < 0 else v for k, v in scenarios_30d.items()}
+        # 注：第二层情景匹配输出直接作为最终预测，不再强制翻正方向。
+        # 封锁期油价可能正处于高位回落阶段，第二层的真实判断（含负向）比强制看涨更准确。
 except Exception:
     if is_black_swan:
         extreme_active = True
