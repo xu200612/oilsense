@@ -1,52 +1,57 @@
 {
   "霍尔木兹海峡": {
-    "count": 0,
+    "count": 9,
     "normal_count": 32,
     "risk": "极高风险",
     "color": "#e74c3c",
-    "importance": "全球20%石油贸易经过此处",
-    "ratio": 0.0,
+    "importance": "全球约20%石油海运贸易通道",
+    "ratio": 28.1,
     "ais_coverage": true,
-    "timestamp": "2026-05-18 10:51:47"
+    "source": "VesselAPI(+ShipFinder未授权)",
+    "timestamp": "2026-05-30 17:16:57"
   },
   "曼德海峡": {
     "count": 0,
     "normal_count": 18,
     "risk": "数据不足",
     "color": "#95a5a6",
-    "importance": "红海通往印度洋的唯一通道",
+    "importance": "红海通往印度洋关键通道",
     "ratio": 0.0,
     "ais_coverage": false,
-    "timestamp": "2026-05-18 10:51:47"
+    "source": "VesselAPI(+ShipFinder未授权)",
+    "timestamp": "2026-05-30 17:16:57"
   },
   "苏伊士运河": {
-    "count": 0,
+    "count": 7,
     "normal_count": 15,
-    "risk": "数据不足",
-    "color": "#95a5a6",
-    "importance": "欧洲与亚洲最短海上航线",
-    "ratio": 0.0,
-    "ais_coverage": false,
-    "timestamp": "2026-05-18 10:51:47"
+    "risk": "高风险",
+    "color": "#e67e22",
+    "importance": "欧亚最短海上航线",
+    "ratio": 46.7,
+    "ais_coverage": true,
+    "source": "VesselAPI(+ShipFinder未授权)",
+    "timestamp": "2026-05-30 17:16:57"
   },
   "马六甲海峡": {
-    "count": 135,
+    "count": 75,
     "normal_count": 85,
     "risk": "正常",
     "color": "#2ecc71",
-    "importance": "中东原油运往亚洲的主要通道",
-    "ratio": 158.8,
+    "importance": "中东原油运往亚洲主要通道",
+    "ratio": 88.2,
     "ais_coverage": true,
-    "timestamp": "2026-05-18 10:51:47"
+    "source": "VesselAPI(+ShipFinder未授权)",
+    "timestamp": "2026-05-30 17:16:57"
   },
   "博斯普鲁斯海峡": {
-    "count": 7,
+    "count": 37,
     "normal_count": 12,
-    "risk": "高风险",
-    "color": "#e67e22",
-    "importance": "俄罗斯黑海原油出口唯一通道",
-    "ratio": 58.3,
+    "risk": "正常",
+    "color": "#2ecc71",
+    "importance": "黑海原油出口关键通道",
+    "ratio": 308.3,
     "ais_coverage": true,
-    "timestamp": "2026-05-18 10:51:47"
+    "source": "VesselAPI(+ShipFinder未授权)",
+    "timestamp": "2026-05-30 17:16:57"
   }
 }
