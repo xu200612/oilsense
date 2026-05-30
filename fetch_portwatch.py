@@ -125,18 +125,34 @@ def build_portwatch_history():
 
     # 衍生特征：霍尔木兹封锁信号
     if "cp6_tanker" in result.columns:
-        # 7日滚动均值
         result["hormuz_tanker_ma7"]  = result["cp6_tanker"].rolling(7).mean()
-        # 与历史同期对比的异常度（z-score）
         result["hormuz_tanker_zscore"] = (
             (result["cp6_tanker"] - result["cp6_tanker"].rolling(90).mean()) /
             (result["cp6_tanker"].rolling(90).std() + 1e-6)
         )
-        # 封锁信号：油轮数量低于历史均值50%
-        result["hormuz_blocked"] = (
-            result["cp6_tanker"] <
-            result["cp6_tanker"].rolling(90).mean() * 0.5
-        ).astype(int)
+        # 封锁信号：使用"冻结基准"避免滚动均值被封锁数据污染
+        # 初次检测用90日滚动均值；一旦触发封锁，冻结封锁前的基准，持续以此判断
+        rolling_mean_90 = result["cp6_tanker"].rolling(90, min_periods=20).mean()
+        blocked_raw = (result["cp6_tanker"] < rolling_mean_90 * 0.5)
+        blocked_list = []
+        frozen_baseline = None
+        for i, (dt, is_blocked) in enumerate(blocked_raw.items()):
+            if frozen_baseline is None:
+                # 封锁前：正常用滚动均值判断
+                blocked_list.append(int(is_blocked))
+                if is_blocked:
+                    # 首次触发：冻结此前90日均值作为永久基准
+                    pre_idx = max(0, i - 1)
+                    frozen_baseline = float(result["cp6_tanker"].iloc[max(0, pre_idx - 89): pre_idx + 1].mean())
+            else:
+                # 封锁后：用冻结基准判断（不受后续低流量数据影响）
+                blocked_list.append(int(result["cp6_tanker"].loc[dt] < frozen_baseline * 0.5))
+                # 连续3日高于冻结基准60%则视为封锁解除，重置基准
+                if i >= 3:
+                    recent_3 = result["cp6_tanker"].iloc[i - 2: i + 1]
+                    if all(recent_3 > frozen_baseline * 0.6):
+                        frozen_baseline = None
+        result["hormuz_blocked"] = blocked_list
 
     if "cp4_tanker" in result.columns:
         result["mandeb_tanker_ma7"] = result["cp4_tanker"].rolling(7).mean()

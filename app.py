@@ -2471,7 +2471,7 @@ elif page == "风险预测":
     ))
     fig.add_trace(go.Scatter(
         x=recent.index, y=recent["target"],
-        name="实际涨跌幅", line=dict(color="#e74c3c", width=1.5), opacity=0.8
+        name="实际涨跌幅（10日后）", line=dict(color="#e74c3c", width=1.5), opacity=0.8
     ))
     fig.add_hline(y=0, line_dash="solid", line_color="rgba(255,255,255,0.3)", line_width=1)
     # 极端期红色背景
@@ -2901,7 +2901,7 @@ elif page == "历史回测":
     fig.update_yaxes(gridcolor="#2d3748", title_text="未来10日涨跌幅", tickformat=".0%", range=return_axis_range, row=2, col=1)
     fig.update_xaxes(gridcolor="#2d3748")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("绿色 = 综合输出（门控+极端情景） | 红色 = 实际涨跌 | 红底色 = 极端期 | 区间 = P10~P90")
+    st.caption("绿色 = 综合输出（门控+极端情景） | 红色 = 实际10日涨跌幅（当日起向后10个交易日的实际收益，非当日价格变化）| 红底色 = 极端期 | 区间 = P10~P90")
 
     st.divider()
 
