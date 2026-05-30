@@ -281,6 +281,14 @@ def find_similar_events(current_features: pd.Series, top_k: int = 3) -> list:
     """
     feat = _load_feature_matrix()
 
+    # 时序因果约束：从当前样本的索引推断"截至日期"，仅匹配结果已完全展开的历史事件。
+    # 事件的 actual_return / return_30d 来自其触发日之后的实际走势，若事件距当前日不足30天，
+    # 这些"结果"相对当前预测点属于未来信息，构成前视泄露（自我匹配）。
+    as_of_date = None
+    _name = getattr(current_features, "name", None)
+    if isinstance(_name, pd.Timestamp):
+        as_of_date = _name
+
     # 推断触发类型，优先在同类事件里匹配
     trigger_type = _infer_trigger_type(current_features)
 
@@ -300,6 +308,10 @@ def find_similar_events(current_features: pd.Series, top_k: int = 3) -> list:
     for ev in EXTREME_EVENTS:
         try:
             start_ts = pd.Timestamp(ev["start"])
+            # 时序因果过滤：仅保留触发日早于当前日30天以上的事件（结果窗口已完全展开）
+            # 这同时排除了"用正在回测的事件本身做参照"的自我匹配
+            if as_of_date is not None and start_ts + pd.Timedelta(days=30) > as_of_date:
+                continue
             # 取触发日前后5日窗口均值
             window_start = start_ts - pd.Timedelta(days=2)
             window_end   = start_ts + pd.Timedelta(days=2)
