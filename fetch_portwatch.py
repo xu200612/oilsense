@@ -113,7 +113,7 @@ def build_portwatch_history():
                  f"{short}_cap_tanker", f"{short}_cap_total"]]
 
         all_dfs.append(df)
-        print(f"✓ {len(df)} 条  ({df.index[0].date()} ~ {df.index[-1].date()})")
+        print(f"OK {len(df)} 条  ({df.index[0].date()} ~ {df.index[-1].date()})")
 
     if not all_dfs:
         print("未获取到任何数据")
