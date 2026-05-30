@@ -2666,11 +2666,20 @@ elif page == "风险预测":
         st.subheader("SHAP 因子贡献解释（TreeSHAP）")
         _asof    = str(_shap_cur.get("asof_date", pd.Series([""])).iloc[0])
         _pred_shap = float(_shap_cur.get("prediction_mid", pd.Series([0])).iloc[0])
-        st.caption(
-            "TreeSHAP 将当前 Enhanced XGBoost 预测拆解为各因子贡献。"
-            "正值（红色）推高油价预测，负值（蓝色）拉低油价预测。"
-            f"  解释日期：{_asof}  ｜  SHAP 综合预测：{_pred_shap*100:+.2f}%"
-        )
+        if extreme_active:
+            st.caption(
+                "TreeSHAP 将第一层 Enhanced XGBoost 的统计预测拆解为各因子贡献："
+                "正值（红色）推高、负值（蓝色）拉低。"
+                f"  解释日期：{_asof}  ｜  第一层 SHAP 综合预测：{_pred_shap*100:+.2f}%。"
+                "　⚠️ 当前处于极端情景模式：页面最终风险区间已由第二层历史情景匹配修正，"
+                "与此处第一层预测可能不同；第二层（非树模型，TreeSHAP 不适用）的判断依据见上方“最相似历史事件”。"
+            )
+        else:
+            st.caption(
+                "TreeSHAP 将当前 Enhanced XGBoost 预测拆解为各因子贡献。"
+                "正值（红色）推高油价预测，负值（蓝色）拉低油价预测。"
+                f"  解释日期：{_asof}  ｜  SHAP 综合预测：{_pred_shap*100:+.2f}%"
+            )
         _top = _shap_cur.sort_values("abs_shap", ascending=False).head(12)
         _sc1, _sc2 = st.columns([1.05, 1.25])
         with _sc1:
