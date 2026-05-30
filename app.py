@@ -2160,7 +2160,7 @@ elif page == "市场概览":
 # ══════════════════════════════════════════════════════════════════════════
 elif page == "风险预测":
     st.title("油价风险因子分析")
-    st.caption("基于多维因子的油价波动驱动分析与风险量化 · XGBoost + Claude AI 双层模型")
+    st.caption("基于多维因子的油价波动驱动分析与风险量化 · 第一层 XGBoost 分位数回归 + 第二层历史情景匹配（Claude AI 生成风险报告）")
 
     # last_low/last_mid/last_high/extreme_active 等已在全局计算完毕，直接使用
 
@@ -2717,7 +2717,7 @@ elif page == "风险预测":
                     height=430, margin=dict(l=0, r=20, t=10, b=0),
                     plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
                     font=dict(color="white"),
-                    xaxis=dict(showgrid=False, tickangle=-35),
+                    xaxis=dict(showgrid=False, tickangle=-35, type="category"),
                     yaxis=dict(showgrid=False),
                 )
                 st.plotly_chart(_fig_heat, use_container_width=True, key="chart_shap_matrix")
@@ -2736,7 +2736,7 @@ elif page == "风险预测":
                 height=220, margin=dict(l=0, r=20, t=6, b=0),
                 plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
                 font=dict(color="white"),
-                xaxis=dict(showgrid=False, tickangle=-35),
+                xaxis=dict(showgrid=False, tickangle=-35, type="category"),
                 yaxis=dict(showgrid=False),
             )
             st.plotly_chart(_fig_grp, use_container_width=True, key="chart_shap_group")
