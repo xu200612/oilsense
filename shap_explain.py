@@ -66,7 +66,11 @@ def compute_shap_outputs(window: int = 90, top_n: int = 16):
     x = data[cols]
 
     booster = model.get_booster()
-    contrib = booster.predict(DMatrix(x, feature_names=cols), pred_contribs=True)
+    # 模型经 early stopping 训练，推理仅用 best_iteration 棵树。SHAP 必须用相同的
+    # iteration_range，否则解释的是"全部树"的预测，与系统实际展示的预测不一致。
+    _bi = booster.best_iteration
+    _ir = (0, _bi + 1) if _bi is not None else (0, 0)
+    contrib = booster.predict(DMatrix(x, feature_names=cols), pred_contribs=True, iteration_range=_ir)
     shap_values = pd.DataFrame(contrib[:, :-1], index=x.index, columns=cols)
     bias = pd.Series(contrib[:, -1], index=x.index, name="bias")
 
@@ -117,6 +121,7 @@ def compute_shap_outputs(window: int = 90, top_n: int = 16):
                 current_contrib = booster.predict(
                     DMatrix(current_x, feature_names=cols),
                     pred_contribs=True,
+                    iteration_range=_ir,
                 )
                 current = pd.DataFrame({
                     "feature": cols,
