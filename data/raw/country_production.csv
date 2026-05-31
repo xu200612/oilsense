@@ -1,14 +1,14 @@
 ﻿country,eia_code,production_mbd,period,source,status,activity,product,updated_at,share_pct
-美国,USA,22.009,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:41,21.47
-俄罗斯,RUS,10.651,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:42,10.39
-沙特阿拉伯,SAU,11.91,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:42,11.62
-伊拉克,IRQ,4.521,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:43,4.41
-伊朗,IRN,4.685,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:44,4.57
-阿联酋,ARE,4.762,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:45,4.65
-科威特,KWT,2.885,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:45,2.81
-挪威,NOR,2.2,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:46,2.15
-哈萨克斯坦,KAZ,1.381,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:47,1.35
-尼日利亚,NGA,1.612,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:47,1.57
-利比亚,LBY,1.418,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:48,1.38
-委内瑞拉,VEN,0.835,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:48,0.81
-阿尔及利亚,DZA,1.43,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-30 17:16:49,1.4
+美国,USA,22.009,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:15,21.47
+俄罗斯,RUS,10.651,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:15,10.39
+沙特阿拉伯,SAU,11.91,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:17,11.62
+伊拉克,IRQ,4.521,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:18,4.41
+伊朗,IRN,4.685,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:19,4.57
+阿联酋,ARE,4.762,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:19,4.65
+科威特,KWT,2.885,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:20,2.81
+挪威,NOR,2.2,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:21,2.15
+哈萨克斯坦,KAZ,1.381,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:22,1.35
+尼日利亚,NGA,1.612,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:22,1.57
+利比亚,LBY,1.418,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:23,1.38
+委内瑞拉,VEN,0.835,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:24,0.81
+阿尔及利亚,DZA,1.43,2026-01,EIA International monthly API,准实时（月度官方）,Production,"Crude oil, NGPL, and other liquids",2026-05-31 20:10:25,1.4

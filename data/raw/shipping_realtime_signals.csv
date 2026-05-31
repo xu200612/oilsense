@@ -1,6 +1,6 @@
 ﻿date,chokepoint,count,tanker_count,risk_count,normal_count,ratio,risk,status,source,timestamp
-2026-05-30,霍尔木兹海峡,9,0,9,32,0.281,极高风险,ok,VesselAPI(+ShipFinder未授权),2026-05-30 09:16:53 UTC
-2026-05-30,曼德海峡,0,0,0,18,0.0,数据不足,no_data,VesselAPI(+ShipFinder未授权),2026-05-30 09:16:53 UTC
-2026-05-30,苏伊士运河,7,0,7,15,0.467,高风险,ok,VesselAPI(+ShipFinder未授权),2026-05-30 09:16:53 UTC
-2026-05-30,马六甲海峡,75,0,75,85,0.882,正常,ok,VesselAPI(+ShipFinder未授权),2026-05-30 09:16:53 UTC
-2026-05-30,博斯普鲁斯海峡,37,0,37,12,3.083,正常,ok,VesselAPI(+ShipFinder未授权),2026-05-30 09:16:53 UTC
+2026-05-31,霍尔木兹海峡,10,0,10,32,0.312,极高风险,ok,VesselAPI(+ShipFinder未授权),2026-05-31 12:10:35 UTC
+2026-05-31,曼德海峡,0,0,0,18,0.0,数据不足,no_data,VesselAPI(+ShipFinder未授权),2026-05-31 12:10:35 UTC
+2026-05-31,苏伊士运河,11,0,11,15,0.733,中等风险,ok,VesselAPI(+ShipFinder未授权),2026-05-31 12:10:35 UTC
+2026-05-31,马六甲海峡,76,0,76,85,0.894,正常,ok,VesselAPI(+ShipFinder未授权),2026-05-31 12:10:35 UTC
+2026-05-31,博斯普鲁斯海峡,47,0,47,12,3.917,正常,ok,VesselAPI(+ShipFinder未授权),2026-05-31 12:10:35 UTC
