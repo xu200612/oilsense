@@ -29,6 +29,38 @@ PORTWATCH_URL = (
     "/Daily_Chokepoints_Data/FeatureServer/0/query"
 )
 
+
+def _frozen_block_signal(series, trigger_ratio=0.5, release_ratio=0.6,
+                         window=90, min_periods=20):
+    """Detect blockade using the last normal pre-blockade baseline."""
+    rolling_mean = series.rolling(window, min_periods=min_periods).mean()
+    blocked_raw = series < rolling_mean * trigger_ratio
+    blocked = []
+    frozen_baseline = None
+
+    for i, (dt, is_blocked) in enumerate(blocked_raw.items()):
+        value = series.loc[dt]
+        if pd.isna(value):
+            blocked.append(0)
+            continue
+
+        if frozen_baseline is None:
+            blocked.append(int(bool(is_blocked)))
+            if bool(is_blocked):
+                pre_idx = max(0, i - 1)
+                baseline = series.iloc[max(0, pre_idx - window + 1): pre_idx + 1].dropna()
+                if len(baseline) >= min_periods:
+                    frozen_baseline = float(baseline.mean())
+        else:
+            blocked.append(int(value < frozen_baseline * trigger_ratio))
+            if i >= 2:
+                recent = series.iloc[i - 2: i + 1].dropna()
+                if len(recent) == 3 and all(recent > frozen_baseline * release_ratio):
+                    frozen_baseline = None
+
+    return pd.Series(blocked, index=series.index, dtype="int64")
+
+
 def _parse_portwatch_date(value):
     if isinstance(value, str):
         return pd.to_datetime(value, errors="coerce").strftime("%Y-%m-%d")
@@ -665,15 +697,11 @@ def update_portwatch():
                 (combined["cp6_tanker"] - combined["cp6_tanker"].rolling(90).mean()) /
                 (combined["cp6_tanker"].rolling(90).std() + 1e-6)
             )
-            combined["hormuz_blocked"] = (
-                combined["cp6_tanker"] < combined["cp6_tanker"].rolling(90).mean() * 0.5
-            ).astype(int)
+            combined["hormuz_blocked"] = _frozen_block_signal(combined["cp6_tanker"])
 
         if "cp4_tanker" in combined.columns:
             combined["mandeb_tanker_ma7"] = combined["cp4_tanker"].rolling(7).mean()
-            combined["mandeb_blocked"]    = (
-                combined["cp4_tanker"] < combined["cp4_tanker"].rolling(90).mean() * 0.5
-            ).astype(int)
+            combined["mandeb_blocked"]    = _frozen_block_signal(combined["cp4_tanker"])
 
         if "cp7_tanker" in combined.columns and "cp6_tanker" in combined.columns:
             combined["cape_reroute_signal"] = (

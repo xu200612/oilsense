@@ -338,6 +338,37 @@ FEATURE_WEIGHTS = {
     "high_vol"                : 0.9,
 }
 
+EXTREME_INTERVAL_CAP = 0.35
+
+
+def _cap_interval(low: float, mid: float, high: float, max_width: float):
+    low, high = min(low, high), max(low, high)
+    if high - low <= max_width:
+        return low, high
+    if low <= mid <= low + max_width:
+        return low, low + max_width
+    if high - max_width <= mid <= high:
+        return high - max_width, high
+    return mid - max_width / 2, mid + max_width / 2
+
+
+def _blockade_phase_return(current_features: pd.Series):
+    """Hormuz blockade is phase-dependent: spike first, mean-revert later."""
+    hormuz_blocked = float(current_features.get("hormuz_blocked", 0) or 0)
+    cp6_tanker = float(current_features.get("cp6_tanker", 999) or 999)
+    if hormuz_blocked <= 0 and cp6_tanker >= 5:
+        return None
+
+    ret_20d = float(current_features.get("return_20d", 0) or 0)
+    if abs(ret_20d) < 0.03:
+        return None
+
+    # A sustained blockade creates an initial supply shock, but after a sharp
+    # price run-up the next 10 days often reflect profit-taking/de-escalation
+    # risk. After a sharp selloff, rebound risk rises. This is not a forced
+    # positive rule; the sign follows the event phase.
+    return float(np.clip(-0.20 * ret_20d, -0.12, 0.12))
+
 
 def _load_feature_matrix():
     path = os.path.join(ROOT_DIR, "data", "processed", "feature_matrix.csv")
@@ -529,11 +560,17 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
 
     if not similar:
         # 无匹配，保守扩大置信区间
+        capped_low, capped_high = _cap_interval(
+            base_low * 2.5,
+            base_mid,
+            base_high * 2.5,
+            EXTREME_INTERVAL_CAP,
+        )
         return {
             "activated"     : True,
-            "pred_low"      : base_low  * 2.5,
+            "pred_low"      : round(capped_low, 4),
             "pred_mid"      : base_mid,
-            "pred_high"     : base_high * 2.5,
+            "pred_high"     : round(capped_high, 4),
             "similar_events": [],
             "scale_factor"  : 2.5,
             "trigger_type"  : trigger_type,
@@ -549,6 +586,14 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
         for ev in similar
     ])
     weighted_return_10d = float(np.dot(weights, returns_10d))
+    phase_return = _blockade_phase_return(current_features)
+    phase_adjustment = None
+    if phase_return is not None:
+        phase_weight = 0.65
+        weighted_return_10d = float(
+            (1 - phase_weight) * weighted_return_10d + phase_weight * phase_return
+        )
+        phase_adjustment = round(float(phase_return), 4)
 
     # 30日涨跌幅加权（用于报告情景描述）
     returns_30d = np.array([
@@ -568,6 +613,12 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
     final_low  = min(base_low,  adj_low)
     final_mid  = adj_mid
     final_high = max(base_high, adj_high)
+    final_low, final_high = _cap_interval(
+        final_low,
+        final_mid,
+        final_high,
+        EXTREME_INTERVAL_CAP,
+    )
 
     scale_factor = abs(final_high - final_low) / max(abs(base_high - base_low), 1e-6)
 
@@ -591,6 +642,7 @@ def get_extreme_prediction(current_features: pd.Series, base_low: float,
         "scale_factor"       : round(scale_factor, 2),
         "weighted_return_10d": round(weighted_return_10d, 4),
         "weighted_return_30d": round(weighted_return_30d, 4),
+        "phase_adjustment"   : phase_adjustment,
         "scenarios_30d"      : scenarios_30d,
         "trigger_type"       : trigger_type,
         "severity"           : severity,

@@ -594,7 +594,41 @@ def get_black_swan_status():
     except Exception as e:
         return False, {"error": str(e)}
 
-@st.cache_data(ttl=3600)
+
+def _latest_blockade_streak_start(blocked_series):
+    blocked = blocked_series.fillna(0).astype(float) > 0
+    if len(blocked) == 0 or not bool(blocked.iloc[-1]):
+        return None
+    streak = blocked.iloc[::-1]
+    false_pos = streak[~streak]
+    if len(false_pos) == 0:
+        return blocked.index[0]
+    return false_pos.index[0] + pd.Timedelta(days=1)
+
+
+def _shipping_baseline(series, blocked_series=None):
+    clean = series.dropna()
+    if len(clean) == 0:
+        return 0.0, "正常基准"
+
+    if blocked_series is not None:
+        start = _latest_blockade_streak_start(blocked_series.reindex(series.index))
+        if start is not None:
+            pre = clean[clean.index < start].tail(90)
+            if len(pre) >= 20:
+                return float(pre.mean()), "封锁前90日基准"
+
+    return float(clean.tail(90).mean()), "近90日基准"
+
+
+def _format_ratio_pct(value):
+    if value is None:
+        return "--"
+    if value >= 200:
+        return ">200"
+    return str(round(value, 1))
+
+
 @st.cache_data(ttl=3600)
 def get_chokepoint_status():
     """获取各咽喉点当前状态，AIS有覆盖时优先用AIS数据"""
@@ -632,8 +666,10 @@ def get_chokepoint_status():
 
         # PortWatch基础数据
         pw_latest   = int(round(safe_float(series.iloc[-1], 0.0)))
-        avg_90d     = series.tail(90).mean()
-        pw_ratio    = pw_latest / avg_90d if avg_90d > 0 else 1.0
+        blocked_col = "hormuz_blocked" if cp == "cp6" else "mandeb_blocked" if cp == "cp4" else None
+        blocked_series = df[blocked_col] if blocked_col in df.columns else None
+        baseline, baseline_label = _shipping_baseline(series, blocked_series)
+        pw_ratio    = pw_latest / baseline if baseline > 0 else 1.0
         last_date   = str(series.index[-1].date())
 
         def _risk_color(ratio):
@@ -646,7 +682,15 @@ def get_chokepoint_status():
 
         # AIS数据融合
         ais_entry    = ais_data.get(info["ais_name"]) if info["ais_name"] else None
-        has_ais      = ais_entry and ais_entry.get("ais_coverage", False)
+        ais_timestamp = ais_entry.get("timestamp", "") if ais_entry else ""
+        ais_fresh = False
+        if ais_timestamp:
+            try:
+                ts = pd.to_datetime(ais_timestamp)
+                ais_fresh = abs((pd.Timestamp.now() - ts).total_seconds()) <= 24 * 3600
+            except Exception:
+                ais_fresh = False
+        has_ais      = bool(ais_entry and ais_entry.get("ais_coverage", False) and ais_fresh)
 
         if has_ais:
             ais_count    = ais_entry["count"]
@@ -654,7 +698,6 @@ def get_chokepoint_status():
             ais_ratio    = ais_count / ais_normal if ais_normal > 0 else 1.0
             ais_risk, ais_color = _risk_color(ais_ratio)
             ais_ratio_pct = round(ais_ratio * 100, 1)
-            ais_timestamp = ais_entry.get("timestamp", "")
 
             # 取两者中风险更高的作为主显示
             risk_priority = {"极高风险": 4, "高风险": 3, "偏低": 2, "正常": 1}
@@ -678,7 +721,8 @@ def get_chokepoint_status():
             "importance"   : info["importance"],
             # PortWatch
             "latest"       : pw_latest,
-            "avg_90d"      : round(avg_90d, 1),
+            "avg_90d"      : round(baseline, 1),
+            "baseline_label": baseline_label,
             "ratio"        : round(pw_ratio * 100, 1),
             "risk"         : pw_risk,
             "color"        : pw_color,
@@ -1539,16 +1583,18 @@ if page == "全球能源地图":
     cp_status = get_chokepoint_status()
 
     if cp_status:
-        cols = st.columns(len(cp_status))
         for i, (cp, s) in enumerate(cp_status.items()):
-            with cols[i]:
+            if i % 4 == 0:
+                cols = st.columns(4)
+            with cols[i % 4]:
                 if s["has_ais"] and s["ais_count"] is not None:
+                    ais_ratio_text = _format_ratio_pct(s["ais_ratio"])
                     ais_badge = (
                         "<div style=\"background:rgba(52,152,219,0.15);"
                         "border:1px solid #3498db;border-radius:4px;"
                         "padding:2px 6px;font-size:9px;color:#3498db;"
                         "font-weight:600;margin-bottom:4px;display:inline-block;\">"
-                        f"● AIS实时 · {s['ais_count']}艘 · {s['ais_ratio']}%"
+                        f"● AIS实时 · {s['ais_count']}艘 · {ais_ratio_text}%"
                         "</div>"
                     )
                 else:
@@ -1586,12 +1632,12 @@ if page == "全球能源地图":
                         f"{s['latest']}</div>"
 
                         "<div style=\"color:#6a5a3a;font-size:10px;margin-bottom:6px;\">"
-                        f"油轮/日 · 90日均值 {s['avg_90d']}</div>"
+                        f"油轮/日 · {s['baseline_label']} {s['avg_90d']}</div>"
 
                         f"<div style=\"background:{s['main_color']};color:white;"
                         "border-radius:4px;padding:2px 8px;font-size:11px;"
                         "font-weight:600;display:inline-block;margin-bottom:6px;\">"
-                        f"{s['main_risk']} · {s['ratio']}%</div>"
+                        f"{s['main_risk']} · {_format_ratio_pct(s['ratio'])}%</div>"
 
                         "<div style=\"color:#4a3f28;font-size:9px;"
                         "margin-top:4px;line-height:1.3;\">"
