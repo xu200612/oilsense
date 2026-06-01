@@ -2545,7 +2545,7 @@ elif page == "风险预测":
     st.divider()
 
     # ── 模型性能对比（两套模型整合评估）────────────────────────────────
-    st.subheader("模型性能对比（样本外测试集）")
+    st.subheader("模型性能与风控区间评估（样本外测试集）")
 
     test_start = pred_df.index[int(len(pred_df) * 0.8)]
     test_df    = pred_df.loc[test_start:]
@@ -2619,6 +2619,28 @@ elif page == "风险预测":
     else:
         hybrid_acc = direction_acc
 
+    extreme_coverage = extreme_width = None
+    try:
+        integrated_test = integrated_df.loc[test_df.index]
+        integrated_extreme = integrated_test.loc[extreme_df.index]
+        ext_target = integrated_extreme["target"]
+        valid_ext = (
+            ext_target.notna()
+            & integrated_extreme["integrated_low"].notna()
+            & integrated_extreme["integrated_high"].notna()
+        )
+        if valid_ext.sum() > 0:
+            extreme_coverage = float((
+                (ext_target[valid_ext] >= integrated_extreme.loc[valid_ext, "integrated_low"])
+                & (ext_target[valid_ext] <= integrated_extreme.loc[valid_ext, "integrated_high"])
+            ).mean()) * 100
+            extreme_width = float((
+                integrated_extreme.loc[valid_ext, "integrated_high"]
+                - integrated_extreme.loc[valid_ext, "integrated_low"]
+            ).mean()) * 100
+    except Exception:
+        pass
+
     baseline_mae = baseline_rmse = enhanced_coverage = enhanced_width = None
     try:
         act_all = test_df["target"]
@@ -2636,21 +2658,27 @@ elif page == "风险预测":
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("综合方向命中率（参考）", f"{hybrid_acc}%",
-                  f"+{round(hybrid_acc-50,2)}% vs 随机基准")
-    with col2:
         st.metric(direction_label, f"{direction_acc}%",
-                  f"Baseline {perf['baseline']}%")
+                  f"正常期，Baseline {perf['baseline']}%")
+    with col2:
+        st.metric(
+            "极端期区间覆盖率",
+            "--" if extreme_coverage is None else f"{extreme_coverage:.2f}%",
+            "压力区间口径"
+        )
     with col3:
         if extreme_acc is not None:
-            st.metric("情景滚动命中率（极端期）", f"{extreme_acc}%",
-                      f"{extreme_eval_n}条滚动样本")
+            st.metric("极端期方向命中（参考）", f"{extreme_acc}%",
+                      f"{extreme_eval_n}条，不作主指标")
         else:
-            st.metric("情景滚动命中率（极端期）", "暂无数据",
+            st.metric("极端期方向命中（参考）", "暂无数据",
                       "极端期间样本不足")
     with col4:
-        st.metric("测试集样本数", f"{len(test_df)} 条",
-                  f"正常{n_normal}条 极端{n_extreme}条")
+        st.metric(
+            "极端期平均区间宽度",
+            "--" if extreme_width is None else f"{extreme_width:.2f}%",
+            f"正常{n_normal}条 极端{n_extreme}条"
+        )
 
     q1, q2, q3, q4 = st.columns(4)
     with q1:
@@ -2662,7 +2690,11 @@ elif page == "风险预测":
     with q4:
         st.metric("平均预测区间宽度", "--" if enhanced_width is None else f"{enhanced_width:.2f}%")
 
-    st.caption("说明：方向命中率只衡量未来10日涨跌方向；MAE/RMSE衡量幅度误差；区间覆盖率衡量实际涨跌是否落入P10-P90风险区间。情景匹配已改为逐日滚动回测，不再用当前单一情景方向对整段历史做比较。")
+    st.caption(
+        "说明：正常市场用方向命中率衡量统计预测能力；极端地缘政治期间价格路径会频繁反转，"
+        "系统切换为压力测试/风险区间口径，主看区间覆盖率、宽度和触发证据。"
+        "极端期方向命中仅作参考，不作为项目核心评价指标。"
+    )
 
     st.divider()
 
