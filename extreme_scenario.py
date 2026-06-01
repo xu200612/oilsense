@@ -164,6 +164,8 @@ EXTREME_EVENTS = [
                        "4月18日伊朗再次关闭海峡，封锁持续中",
         "typical_30d": 0.59,   # 实测：从封锁生效日2026-03-02($71.13)至30日后2026-04-02($113.23) = +59%
         "severity"   : "extreme",
+        "role"       : "stress_test",
+        "use_for_matching": False,
     },
 
     # ── 供应政策类 ────────────────────────────────────────────────────────
@@ -409,6 +411,9 @@ def find_similar_events(current_features: pd.Series, top_k: int = 3) -> list:
     改进：使用触发窗口5日均值特征，而非单个时间点，抗噪性更强
     """
     feat = _load_feature_matrix()
+    current_ts = pd.to_datetime(getattr(current_features, "name", None), errors="coerce")
+    if pd.isna(current_ts):
+        current_ts = feat.index.max()
 
     # 推断触发类型，优先在同类事件里匹配
     trigger_type = _infer_trigger_type(current_features)
@@ -428,6 +433,11 @@ def find_similar_events(current_features: pd.Series, top_k: int = 3) -> list:
     event_meta    = []
     for ev in EXTREME_EVENTS:
         try:
+            if ev.get("use_for_matching", True) is False:
+                continue
+            event_end = pd.Timestamp(ev.get("end", ev.get("start")))
+            if event_end >= current_ts:
+                continue
             start_ts = pd.Timestamp(ev["start"])
             # 取触发日前后5日窗口均值
             window_start = start_ts - pd.Timedelta(days=2)

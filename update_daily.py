@@ -941,21 +941,7 @@ def update_feature_matrix():
         feat.to_csv(out_path)
         print(f"  特征矩阵已更新，共 {len(feat)} 条，截至 {feat.index.max().date()}")
 
-        # 近期补充特征（无target）：feat_full已含完整特征，但最后10行无法算target
-        # 保存这批行供回测展示延伸到今日，不参与训练
-        recent_mask = feat_full.index > feat.index.max()
-        if recent_mask.any():
-            _save_cols = [c for c in all_feature_cols if c in feat_full.columns]
-            for _col in ['WTI', 'Brent']:
-                if _col in feat_full.columns and _col not in _save_cols:
-                    _save_cols = [_col] + _save_cols
-            recent_rows = feat_full.loc[recent_mask, _save_cols].ffill().copy()
-            recent_rows['target'] = float('nan')
-            recent_path = os.path.join(ROOT_DIR, "data", "processed", "recent_features.csv")
-            recent_rows.to_csv(recent_path)
-            print(f"  近期补充特征：{len(recent_rows)} 条，{recent_rows.index[0].date()} ~ {recent_rows.index[-1].date()}")
-
-        # 最新特征行（无target，用于实时预测）
+        # 无target实时特征：用于 recent_features 与 latest_features，不参与训练
         feat_full = raw_df.copy()
         feat_full["return_1d"]   = feat_full["WTI"].pct_change(1)
         feat_full["return_5d"]   = feat_full["WTI"].pct_change(5)
@@ -986,6 +972,20 @@ def update_feature_matrix():
             feat_full["gdelt_conflict_ma5"]  = feat_full["gdelt_conflict_cnt"].rolling(5).mean()
             feat_full["gdelt_tone_chg"]      = feat_full["gdelt_tone"].diff(3)
 
+        # 近期补充特征（无target）：最后10行无法算target，保存供页面延伸到今日
+        recent_mask = feat_full.index > feat.index.max()
+        if recent_mask.any():
+            _save_cols = [c for c in all_feature_cols if c in feat_full.columns]
+            for _col in ["WTI", "Brent"]:
+                if _col in feat_full.columns and _col not in _save_cols:
+                    _save_cols = [_col] + _save_cols
+            recent_rows = feat_full.loc[recent_mask, _save_cols].ffill().copy()
+            recent_rows["target"] = float("nan")
+            recent_path = os.path.join(ROOT_DIR, "data", "processed", "recent_features.csv")
+            recent_rows.to_csv(recent_path)
+            print(f"  近期补充特征：{len(recent_rows)} 条，{recent_rows.index[0].date()} ~ {recent_rows.index[-1].date()}")
+
+        # 最新特征行（无target，用于实时预测）
         latest_row  = feat_full[all_feature_cols].ffill().dropna().tail(1)
         latest_path = os.path.join(ROOT_DIR, "data", "processed", "latest_features.csv")
         latest_row.to_csv(latest_path)
